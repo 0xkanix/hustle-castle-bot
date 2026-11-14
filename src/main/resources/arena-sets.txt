@@ -1,0 +1,109 @@
+# Set-Bewertungen fuer die Arena (Quelle: en.hustlepedia.fr, "Tierlist", 24.09.2026)
+# Name | Punkte je Einheit (Zahl) oder Stufe | Klasse | Lesevarianten
+# Punkte je Einheit (Autor, 24.09.): F=1 E=2 D=3 C=4 B=5 A=6 S=8
+# Autor 22.10.: eigene Punkte je Set (Zahl in der zweiten Spalte, auch negativ) -- schwache Sets ziehen ab,
+# damit Teams mit viel Kraft, aber schlechten Sets eher als schlagbar gelten. "-" = kein Set (setlose Ruestung, -2).
+# Eine Datei arena-sets.txt im Bot-Ordner hat Vorrang vor dieser Liste.
+Eclipse|-3|tank
+Executioner of Darkness|4|tank|arxness,uarxness   # 11.10. gelesen "execut-oner OT uarxness"
+Executioner of Light|-3|tank
+Firewings|-3|tank
+Shield of Empire|-3|tank
+Ragewing|-3|tank
+Storm|-3|tank
+Legionnaire|-3|tank
+Nameless King|-3|tank
+Inquisitor|-3|tank
+Red Cape|-3|tank
+Paladin|-3|tank
+Annihilator|-3|tank
+Bastion|-3|tank
+Crusader|2|tank
+Royal Trapper|-3|tank
+Herald of Cold|4|tank
+Shadow|-3|tank
+Blade King|-3|tank
+Lone Traveler|-3|tank
+Arbiter|-3|tank
+Monarch Ruby|-3|tank|ruby monarch   # Pruefung 29.10.: im Spiel "Ruby Monarch" (12x unbekannt)
+Octohand|-3|mage
+Cardsharper|-3|mage
+Illusionist|2|mage
+Battlemage|-3|mage
+Archivist|4|mage
+Darkula|-3|mage
+Crystallite|-3|mage
+Faerie King|4|mage
+Necromancer|4|mage
+Cultist|4|mage
+Chronomage|-3|mage
+Oracle|-3|mage
+Snake Charmer|-3|mage
+Knowledge Keeper|3|mage|knowteage,nowleage,knowleage   # Pruefung 29.10.: ~25x "Knowteage/noWLeage Weapon"
+Soul Robin|4|mage
+Priest|-3|mage
+Incinerator|3|mage
+Ice Angler|5|mage
+Servant of the Night|3|mage|ervant ot,ervanr ot,servant of t   # Autor 11.10.: gelesen "servant OT t Outfit", "ervanr OT Outfit"
+Defender of Nature|5|mage|nature,tenaer o,venaer o,efender,verenaer o,uerenaer o   # Autor 11.10.: S statt E; gelesen "uetenaer ot Nature s", "veTenaer o Outfit"
+Mercenary|-3|archer
+Raider|-3|archer
+Specialist|-3|archer
+Reptile|-3|archer
+Forest Watcher|4|archer
+Van Hellsong|-3|archer
+Dragonborn|1|archer
+Conqueror|-3|archer
+Robin Bad|2|archer
+Forest Guardian|4|archer
+Frost Death|-3|archer
+Reaver|-3|archer
+Huntsman|3|archer
+Eagle Eye|3|archer
+Inventor|-3|archer
+Pyromancer|D|archer
+Armor Breaker|5|archer|breaker,breaxer,reaxer,oreake,oreaxe,oreat   # Autor, 24.09.: S statt A (Hustlepedia sagt A); 11.10. Lesevarianten
+Gunslinger|-3|archer
+Ranger|-3|archer
+Doom|-3|archer
+Demon Hunter|-3|archer
+# Autor 11.10.: KEINE Sets (nur Ausruestung, -4 Punkte) -- auch verlesen erkennen (Name|-|-|Lesevarianten)
+Magic Inside|-|-
+Magic Tenacity|-|-
+Drakkar Shot|-|-
+Lady's Order|-|-
+Supreme Sovereign|-|-
+Deadly Lightning|-|-|liahtnina,deadlv
+Indestructible Monolith|-|-|monolith,monoutn
+Blue Steel|-|-
+Harvest Sentinel|-|-
+Moving Castle|-|-
+Runemaster|-|-
+Professor Owl|-|-|professor ow
+Amber Visage|-|-
+Ancient Dexterity|-|-
+Avian Gem|-|-
+Blades Plate Mail|-|-
+Champion of the Century|-|-|century
+Court Wizard|-|-
+Elven Warrior|-|-
+Emerald Guardian|-|-
+Emerald Infiltrator|-|-
+Forest Menace|-|-
+God of War|-|-
+Golden Invader|-|-
+Immortality Seeker|-|-
+Immortality Plate Mail|-|-|immortatlty
+Librarian's Mantle|-|-
+Martian Invader|-|-
+Reborn Gear|-|-
+Sea Demon|-|-
+Shahanshah's Falcon|-|-|shahanshah
+Snowy Hunt|-|-
+The Desert Folk|-|-|desert folk
+Unseen Witness|-|-
+Violent Thunder|-|-|tent thunder
+Well-Fed Farmer|-|-|fed farmer
+Wolfhound|-|-
+Thunderous Light|-|-|nunaerous,aerous lig
+Power of the|-|-|power ot tne,ower ot tne,power ot t

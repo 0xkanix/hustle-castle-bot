@@ -1,0 +1,4 @@
+﻿liste.txt
+PC-Cleaner.bat
+PC-Cleaner.ps1
+README.txt

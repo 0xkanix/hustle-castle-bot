@@ -1,0 +1,28 @@
+# Build
+/target/
+dependency-reduced-pom.xml
+/natives/
+
+# Laufzeit-Daten des Bots (entstehen beim Spielen, gehoeren nicht ins Projekt)
+/logs/
+/aufnahmen/
+/fehlerberichte/
+/arena-*.txt
+/arena-*/
+/*-erledigt.txt
+/befehl.txt
+*.log
+
+# Eigene Einstellungen mit Geheimnissen -- nie hochladen
+geheim.properties
+config.local.properties
+
+# Grosse Texterkennungs-Modelle (nicht im Projekt)
+src/main/resources/paddleocr/
+
+# Windows / Editoren
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.iml

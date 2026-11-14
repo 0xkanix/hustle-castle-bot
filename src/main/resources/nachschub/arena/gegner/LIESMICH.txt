@@ -1,0 +1,75 @@
+Arena: eigene Gegner-Listen (freiwillig)
+========================================
+
+Diese Ordner sind absichtlich leer. Hier kommen DEINE Gegner hinein -- als
+Bild des Namens, so wie er im Schild der Pyramide steht. WICHTIG: nur die
+Buchstaben des Namens -- OHNE das Wappen davor, OHNE den Clan darunter und
+OHNE Rahmen. Sonst erkennt der Bot den Spieler nicht wieder, sobald er den
+Clan oder das Wappen wechselt.
+
+  niemals\   ar_block_...    diesen Gegner NIE angreifen
+  meiden\    ar_ungern_...   lieber nicht angreifen
+  sicher\    ar_sicher_...   sicherer Sieg, wird bevorzugt
+  machbar\   ar_machbar_...  machbar, leicht bevorzugt
+  clans\     ar_clan_...     Name eines starken Clans, seine Spieler werden etwas gemieden
+
+So nimmst du einen auf:
+  1. Capture-Images.exe starten, im Turnier die Pyramide fotografieren.
+  2. Rahmen um den Namen ziehen.
+  3. "Anderes Bild..." druecken und den Namen eintippen, z. B. ar_block_1
+     oder ar_sicher_max. Das Bild landet von selbst im richtigen Ordner.
+
+Noch einfacher: eine Zeile in arena-aufnehmen.txt im Bot-Ordner, z. B.
+  Max | sicher
+(oder machbar / meiden). Sobald der Bot den Namen in der Pyramide liest,
+schneidet er das Bild selbst aus und streicht die Zeile.
+
+Der Bot lernt auch selbst dazu und nimmt die Gegner von allein auf:
+  Sieg unter 8 s ......................... sicher
+  Sieg 8 bis 14 s ........................ machbar
+  Niederlage ab 20 s ..................... machbar
+  Niederlage 7 bis 20 s .................. meiden
+  Niederlage unter 7 s ................... niemals (sicher verloren)
+  stand auf "sicher" und hat gewonnen .... ab jetzt machbar
+Diese Bilder liegen im Ordner gelernt\arena neben dem Bot, nicht hier.
+Darum ist jede Freunde-Fassung am Anfang leer: Jeder hat eine andere Kraft
+und ein anderes Team -- wer fuer den einen sicher ist, ist es fuer den
+anderen nicht.
+
+
+Arena: your own opponent lists (optional)
+=========================================
+
+These folders are empty on purpose. YOUR opponents go in here -- as a
+picture of the name as it stands in the shield of the pyramid. IMPORTANT:
+only the letters of the name -- WITHOUT the crest in front, WITHOUT the clan
+below and WITHOUT frame. Otherwise the bot won't recognise the player once
+he changes his clan or crest.
+
+  niemals\   ar_block_...    NEVER attack this opponent
+  meiden\    ar_ungern_...   rather not attack
+  sicher\    ar_sicher_...   safe win, preferred
+  machbar\   ar_machbar_...  doable, slightly preferred
+  clans\     ar_clan_...     name of a strong clan, its players are slightly avoided
+
+How to add one:
+  1. Start Capture-Images.exe, take a picture of the pyramid in a tournament.
+  2. Drag a frame around the name.
+  3. Press "Other picture..." and type the name, e.g. ar_block_1 or
+     ar_sicher_max. The picture goes into the right folder by itself.
+
+Even easier: one line in arena-aufnehmen.txt in the bot folder, e.g.
+  Max | sicher
+(or machbar / meiden). As soon as the bot reads the name in the pyramid,
+it cuts out the picture itself and removes the line.
+
+The bot also learns by itself and adds opponents on its own:
+  win under 8 s .......................... sicher (safe)
+  win 8 to 14 s .......................... machbar (doable)
+  defeat after 20 s or more .............. machbar (doable)
+  defeat 7 to 20 s ....................... meiden (avoid)
+  defeat under 7 s ....................... niemals (never, sure loss)
+  was "sicher" and won against you ....... from now on machbar
+Those pictures are in the folder gelernt\arena next to the bot, not here.
+That's why every friends' version starts empty: everyone has a different
+power and team -- who is safe for one is not for another.

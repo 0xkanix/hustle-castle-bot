@@ -1,0 +1,211 @@
+===================================================================
+  THE EVENT LOOP -- step by step for beginners
+  (Hustle Castle Bot 2.3, as of 3 Oct 2026)
+===================================================================
+
+  The event loop is the bot's "long run": it plays the Dark
+  Cathedral, collects chests there, goes into the hammer event, uses
+  all hammers, and then starts over -- until nothing is left. On the
+  side it takes care of the lighthouse, the colosseum and (if you
+  want) the clan war.
+
+  You need ONE command in Discord for it. Everything else is a
+  setting you make only once.
+
+
+-------------------------------------------------------------------
+  1. WHAT THE BOT DOES, IN ORDER
+-------------------------------------------------------------------
+
+  Round after round, again and again:
+
+  1. CATHEDRAL WITH KEYS
+     The bot plays the Dark Cathedral (route c = as fast as possible)
+     as long as it has keys. Every run brings cathedral chests into
+     the bag.
+
+  2. CATHEDRAL WITH FOOD
+     When the keys are gone, it pays the cathedral with food
+     (100,000 per run) -- up to your food limit per round (the author uses
+     15 million).
+
+  3. FOOD CHESTS FROM THE BAG
+     When the food in the storage runs low, it opens food chests from
+     the bag -- only as many as fill the storage (1.2 million) nicely.
+     If the storage is too full and the game asks, it says NO. Food is
+     never lost.
+
+  4. OPENING CATHEDRAL CHESTS
+     When the limit is reached (or no food is left), it opens the
+     cathedral chests from the bag. They contain new keys -- and it
+     continues with step 1.
+
+  5. HAMMER EVENT
+     When keys, food and chests are all gone, it goes to the castle
+     and into the hammer event. There it smashes barrels, takes all
+     good rewards (chests, diamonds, essences, food chests ...) and
+     uses the super hammer if you have the gold pass. It stays until
+     the hammers are gone.
+
+  6. ALL OVER AGAIN
+     After the event your food limit is free again ("new round").
+     Back to the cathedral: step 1, 2, 3, 4, 5 ...
+     If there were no hammers in the event, it still goes back to the
+     cathedral -- the hammers come with the next runs.
+
+  ON THE SIDE (nothing to do for you):
+  - LIGHTHOUSE and COLOSSEUM: as soon as the energy is full (about
+    every 105 minutes) it plays the lighthouse between two runs, the
+    colosseum right after, and then carries on.
+  - CLAN WAR: with the war clock on, it deploys your squads at 03:01,
+    09:01, 15:01 and 21:01 (finishes the current run first, deploys,
+    then carries on).
+  - TITAN TOWER: at 02:00 and 12:00, if switched on.
+  - Ad windows, "are you still here?" windows and reward windows are
+    closed by itself.
+
+  END: The loop only stops when not a single run was possible since
+  the last empty event -- no keys, no food, no chests, no hammers.
+  Then it reports in Discord. It does NOT play dungeon runs at the
+  end (unless you set some, see below).
+
+
+-------------------------------------------------------------------
+  2. SET UP ONCE (stays saved)
+-------------------------------------------------------------------
+
+  Before: the bot has to run and answer  !help  in Discord.
+  The game: language ENGLISH, HD graphics OFF, VSync OFF, window mode
+  (see GUIDE-1-SETUP-EN.txt).
+
+  Type the commands into your Discord channel, one after the other.
+  The bot answers each time with the new state.
+
+  a) Food limit per round (IMPORTANT -- without it there is no limit)
+
+         !settings foodlimit cathedral 15m
+
+     15m = 15 million food per round. After every event it counts
+     from 0 again. Want less: 5m, 10m ... Want no limit:
+     !settings foodlimit cathedral off
+
+  b) How to pay (the default is already right)
+
+         !settings pay cathedral all
+
+     "all" means: keys first, then food, then food chests from the
+     bag. That is exactly the loop above.
+
+  c) Storage size (default 1.2 million fits most players)
+
+         !settings storage 1.2m
+
+     The bot opens only as many food chests as fill the storage up to
+     here. Bigger storage: adjust the number.
+
+  d) Event until the hammers are gone (default 999 is already right)
+
+         !settings foodchests 999
+
+     999 = stay in the event until the hammers are gone. Prefer to
+     leave the event after 25 food chests:  25
+
+  e) No dungeon runs at the end (default 0 is already right)
+
+         !settings automation 0
+
+     0 = like the author, no dungeon runs. Want 25 dungeon runs at the end:
+     !settings automation 25
+
+  f) Lighthouse and colosseum on the side (default on)
+
+         !settings lighthouse on
+         !settings colosseum on
+
+  g) Clan war by itself (only if you want it)
+
+         !clanwar on
+
+     Then the bot deploys at the four war times. Off:  !clanwar off
+
+  Everything at a glance:   !settings
+
+
+-------------------------------------------------------------------
+  3. STARTING THE LOOP -- ONE COMMAND
+-------------------------------------------------------------------
+
+         !start eventloop c all
+
+     eventloop = cathedral in a loop (with the hammer event)
+     c         = fastest route through the cathedral (turbo)
+     all       = keys, then food, then food chests
+
+  The bot answers with a "Start" card and gets going. You do not need
+  a number of runs -- it plays until everything is empty.
+
+  Tip: if the lighthouse and colosseum should come FIRST right away
+  (that is how the author started):
+
+         !start lighthouse 1
+         !after colosseum 1
+         !after eventloop c all
+
+  The form works the same:  !start  (nothing after it)
+  -> click mode "Event loop", route c, pay all.
+
+
+-------------------------------------------------------------------
+  4. WHILE IT RUNS
+-------------------------------------------------------------------
+
+  !status      Where it is right now, how many runs are done
+  !stats       Numbers of the day (runs, event stages, fights)
+  !screenshot  A picture of the game, right now
+  !live        Live picture window in Discord
+  !pause       Pause without losing the run
+  !resume      Carry on after the pause
+  !stop        Stop completely (the current run is finished)
+  !castle      The bot goes back to the castle
+
+  The bot reports in Discord by itself: finished runs (every few),
+  lighthouse/colosseum results, clan war deployed, "loop has ended",
+  and errors with a picture and a report.
+
+  Leave the black bot window open and the PC on. Do not click
+  anything on the PC while the bot plays -- it moves the mouse. Set
+  the Windows power saving to "Never" (PC-Check.bat tells you whether
+  that is needed).
+
+
+-------------------------------------------------------------------
+  5. IF SOMETHING GOES WRONG
+-------------------------------------------------------------------
+
+  - "Images are missing ...": capture the named images with
+    capture.bat (see CAPTURE-IMAGES-EN.txt).
+  - The bot stands still and reports "stuck" or "error": it sends a
+    picture and a report to Discord. Then  !start eventloop c all
+    again -- it carries on where the game is (even in the middle of a
+    cathedral journey).
+  - The bot's answers look EMPTY (for !help or !settings), only !log
+    and !screenshot arrive: type  !text on  once. Then it answers as
+    plain text. (Or switch on "Show embeds and link previews" in
+    Discord under Settings -> Appearance -> Messages.)
+  - Questions and errors: open an issue on the GitHub page of the
+    project, with a picture.
+
+
+-------------------------------------------------------------------
+  6. SHORT VERSION TO COPY
+-------------------------------------------------------------------
+
+  Once:
+      !settings foodlimit cathedral 15m
+      !clanwar on                      (only if wanted)
+
+  Every time to start:
+      !start eventloop c all
+
+  Stop:
+      !stop

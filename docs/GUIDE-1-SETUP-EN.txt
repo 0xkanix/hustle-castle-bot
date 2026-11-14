@@ -1,0 +1,82 @@
+===================================================================
+  HUSTLE CASTLE BOT  --  Guide 1 of 5: SET UP THE BOT
+===================================================================
+WHAT IT DOES
+  The bot plays Hustle Castle for you: Dungeon, Dark Cathedral,
+  Arena, clan war and the hammer event. You control it with the
+  control window on your PC, or with commands in Discord -- from
+  your PC or your phone.
+
+  BEFORE YOU START -- PC CHECK
+     Double-click PC-Check.bat. It checks your PC and changes nothing:
+     Windows 11, Hustle Castle installed through the MY.GAMES launcher,
+     enough RAM, screen, text recognition, Discord. OK / !! / XX shows
+     what fits; the result is saved in PC-Check-Ergebnis.txt.
+
+  1. BUILD
+     You need Java 21 and Maven. Double-click build.bat (or run
+     "mvn clean package"). The program is then in target\hustle-bot.jar.
+     Start it with run.bat.
+
+  2. GAME SETTINGS  (very important)
+     Language ENGLISH, HD graphics OFF, VSync OFF,
+     window mode (not full screen).
+
+  Steps 3-5 are OPTIONAL -- only if you want to control the bot
+  with Discord (e.g. from your phone). Without Discord you use the
+  control window. Skip to step 6.
+
+  3. DISCORD SERVER  (optional)
+     Make a free Discord server with one text channel,
+     e.g.  bot-monitoring .
+
+  4. DISCORD BOT  (optional)
+     Go to https://discord.com/developers/applications
+     - "New Application", then "Bot"
+     - switch ON  MESSAGE CONTENT INTENT
+     - copy the TOKEN (keep it secret -- it is the password of your bot)
+     - invite the bot to your server, with the right "Embed Links"
+
+  5. CHANNEL NUMBER  (optional)
+     Discord settings (cog) -> Advanced -> Developer Mode ON.
+     Then right-click your channel -> "Copy Channel ID".
+
+  6. START THE BOT
+     Start Hustle Castle and log in. Then start the bot (run.bat).
+     For Discord, enter your own values in config.properties:
+         discord.botToken    (step 4, optional)
+         discord.channelId   (step 5, optional)
+     The token field in the setup window is hidden like a password.
+     The bot talks to nobody else: no licence server, no telemetry,
+     no automatic updates.
+
+  7. YOUR OWN PICTURES  ->  Guide 2.
+     The folder "templates" already contains the pictures the bot
+     looks for in the game. If your screen looks different and
+     something is not found, take your own with capture.bat.
+
+  8. TEST
+     Start the cathedral with the buttons in the control window.
+     With Discord: your bot is green, type  !help . An answer means
+     everything works.
+
+GOOD TO KNOW
+  - Keep the black window open. Closed = bot off.
+  - Using a bot is against the game's rules. Your own risk.
+
+===================================================================
+  THE CONTROL WINDOW
+  When the bot starts, a big window "Hustle Castle Bot - Control" opens
+  at the top left next to the game. It never covers the game -- it
+  starts behind it. With it you can use the bot WITHOUT Discord:
+  start, pause, stop, emergency, settings, messages, error report.
+  Before you start: game in English, HD Graphics Off, V Sync Off.
+
+===================================================================
+  All guides:
+     GUIDE-1-SETUP-EN.txt
+     GUIDE-2-PICTURES-EN.txt
+     GUIDE-3-COMMANDS-EN.txt
+     GUIDE-4-ARENA-EN.txt
+     GUIDE-5-EVENT-EN.txt
+===================================================================

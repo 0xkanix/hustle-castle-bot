@@ -1,0 +1,12 @@
+Hier gehoeren die Bildvorlagen hinein.
+
+Sie werden nicht von Hand angelegt, sondern mit capture.bat aufgenommen.
+Der Bot durchsucht diesen Ordner samt Unterordnern nach PNG-Dateien.
+Der Dateiname ohne die Endung .png ist der Name der Vorlage.
+
+  templates/dungeon/    Vorlagen fuers Verlies
+  templates/common/     Vorlagen, die ueberall auftauchen
+  templates/cathedral/  spaeter fuer die Dunkle Kathedrale
+
+Die Unterordner dienen nur der Ordnung. Fuer den Bot zaehlt allein der
+Dateiname, nicht der Ordner. Denselben Namen darf es also nur einmal geben.

@@ -1,0 +1,34 @@
+===================================================================
+  HUSTLE CASTLE BOT  --  Guide 4 of 5: ARENA
+===================================================================
+  Before: the picture "Arena: your name" (Part 2).
+  The bot looks at every opponent (power, sets, artifacts, emblems,
+  alliance talents) and attacks the one with the best chance.
+  Round 1 the weakest. It learns from every fight and marks
+  players "safe", "avoid" or "never".
+  A tournament is always played to the end.
+
+     !notes                    notebook of all opponents
+     !note Max 4 builders      your own note about a player
+     !arenareserve 10          always keep 10 tickets
+     !start arena 5 food       pay with food instead of tickets
+
+  PUT PLAYERS ON A LIST YOURSELF (capture.bat)
+  Lists: Doable, Safe win, Never attack, Avoid.
+  a) "Take picture" of the arena pyramid, drag a tight frame around
+     ONE white player name (not the clan), click "Arena: save name...",
+     choose the list. Repeat for more names.
+  b) Player not in your pyramid right now? Click "Arena: type names...",
+     type the names separated by commas (e.g. Xenos, Walking Death)
+     and choose the list. The bot cuts them out by itself as soon as
+     it sees them in the arena.
+
+
+===================================================================
+  All guides:
+     GUIDE-1-SETUP-EN.txt
+     GUIDE-2-PICTURES-EN.txt
+     GUIDE-3-COMMANDS-EN.txt
+     GUIDE-4-ARENA-EN.txt
+     GUIDE-5-EVENT-EN.txt
+===================================================================

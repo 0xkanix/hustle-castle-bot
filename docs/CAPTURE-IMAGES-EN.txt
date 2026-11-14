@@ -1,0 +1,264 @@
+===================================================================
+  CAPTURING YOUR OWN PICTURES
+===================================================================
+
+  IN SHORT
+
+  1. Start Hustle Castle, begin a dungeon.
+  2. Double-click capture.bat.
+  3. At the top the window tells you which picture is next and
+     where to find it. Open exactly that in the game.
+  4. "Take picture" -> drag a frame with the mouse ->
+     "Save and next".
+  5. Repeat until the bar at the bottom is full.
+
+  Done. This is one-off work -- unless you swap your fighters.
+
+
+  ARENA LISTS (players you want to sort yourself)
+
+  Lists: Doable, Safe win, Never attack, Avoid.
+  - In the arena pyramid: "Take picture", drag a tight frame
+    around ONE white player name (not the clan), click
+    "Arena: save name..." and choose the list. Repeat for more.
+  - Player not in your pyramid now: "Arena: type names...",
+    type names separated by commas, choose the list. The bot cuts
+    them out by itself as soon as it sees them in the arena.
+
+
+===================================================================
+  WHY AT ALL
+===================================================================
+
+  The bot is blind. It compares the screen with small saved picture
+  snippets and clicks where it recognises one.
+
+  Almost all these snippets come with the bot: buttons, symbols,
+  digits, windows. They look the same for every player.
+
+  Your fighters and your player name don't. You capture those
+  yourself, otherwise the bot does not recognise your team.
+
+  You do NOT need to rename anything in the game. You photograph
+  your fighters as they are. How important each one is, you tell
+  the bot by the order in the tool.
+
+
+===================================================================
+  WHAT YOU NEED TO CAPTURE
+===================================================================
+
+  REQUIRED -- without these two the dungeon does not start:
+
+      Your player name          shown on the dungeon map
+      Sacrifice fighter: face   the fighter you would give up first
+                                at the sacrifice altar
+
+  OPTIONAL, but strongly recommended:
+
+      Sacrifice fighter: name   the name under that same fighter
+      Fighter 1 to 6            your fighters by importance, each
+                                with face and name
+
+  Fighter 1 is your most important one. It is revived first,
+  sacrificed last and goes up first in the duel. Fighter 2 is the
+  second most important, and so on.
+
+  Fewer than six fighters? Click "Skip" for the rest.
+
+  The cathedral needs no pictures of your own. With fighters 1 to 4
+  it revives fallen fighters, though -- without them it leaves
+  them lying.
+
+  FOR THE ARENA (only if you use !start arena) -- REQUIRED:
+
+      Arena: your name          your name in your OWN shield of
+                                the pyramid in a tournament
+
+  Frame only the letters of your name -- without the clan below
+  and without the frame. Without this picture the arena does not
+  start. If the bot still cannot read your name, write it into the
+  first line of a new text file arena-name.txt in the bot folder.
+
+
+===================================================================
+  WHERE TO FIND THE PICTURES
+===================================================================
+
+  All pictures come from the dungeon. Start a dungeon by hand once
+  -- both screens are there:
+
+  1. THE DUNGEON MAP
+     At the bottom of the map there are two name tags, yours and
+     your partner's. From here: "Your player name".
+
+  2. THE SQUAD SCREEN BEFORE A BATTLE
+     At the top it says "Drag and drop dwellers to form your squad",
+     at the bottom your fighters stand in a row, each with face and
+     name below. From here: all fighters.
+
+  3. THE ARENA PYRAMID (only for the arena)
+     Only exists in a running tournament: start a tournament by
+     hand and wait for the ten shields (top right "Select the next
+     opponent"). Find your own shield.
+     From here: "Arena: your name".
+
+  Please do NOT capture the fighters in the cathedral. The row
+  looks similar there, but whether the names look the same is not
+  certain -- and they are needed in the dungeon.
+
+
+===================================================================
+  STEP BY STEP
+===================================================================
+
+  1. Start Hustle Castle and go to one of the two screens above.
+
+  2. In the folder C:\HustleBot double-click  capture.bat .
+     Two windows open: a black one (it belongs to it, leave it
+     open) and the tool "Capture pictures".
+
+  3. At the top of the tool it says what is next, for example:
+
+         Picture 3 of 15:   Fighter 1: face
+
+     Below, in one sentence, what to frame and on which screen.
+
+  4. Open exactly that screen in the game. Then click "Take
+     picture" in the tool. Now you see your game in the window.
+
+  5. Drag a frame around the spot with the mouse: press, drag,
+     release. Wrong? Just drag again, the old frame disappears.
+
+  6. Click "Save and next". The tool jumps to the next picture.
+
+  7. Continue at 4 until the bar at the bottom is full.
+
+  THE BUTTONS
+
+      Take picture            photographs the game
+      Save and next           cuts out the frame and goes on
+      Skip                    leave this picture out
+      < Back                  one picture back, e.g. to redo it
+      Picture from file...    uses a saved screenshot instead
+      Other picture...        for experts only
+
+  A picture you already have shows a tick at the top. You can
+  capture it again any time -- the old one is replaced.
+
+
+===================================================================
+  WHAT MATTERS
+===================================================================
+
+  FRAME TIGHTLY, BUT DON'T CUT ANYTHING OFF
+      For the name only the letters, for the fighter only the face.
+      Rule of thumb: whatever is inside the frame must ALWAYS look
+      the same.
+
+  NOTHING THAT MOVES
+      No health bars, no changing numbers, no flashing effects.
+
+  FOR THE FACE, TAKE THE HEAD
+      Head and shoulders are enough. Armour and weapons change as
+      soon as you re-equip.
+
+  NOT DURING AN ANIMATION
+      Wait until nothing moves any more, then "Take picture".
+
+  ALWAYS THE SAME GAME SETTINGS
+      Language English, HD graphics OFF, VSync OFF, window mode.
+      Exactly as in GUIDE-1-SETUP-EN.txt step 2.
+
+
+===================================================================
+  PLAYING WITH A FRIEND  (optional)
+===================================================================
+
+  If you want to play the dungeon with a particular friend
+
+      !start dungeon 10 lisa
+
+  the bot needs ONE picture of their name. That is how it finds
+  them in your friends list -- even further down, it scrolls itself.
+
+  1. In the game go to the dungeon, "Participate", then "Friend"
+     in the partner search. Now your friends list is shown.
+  2. Open capture.bat and click "Skip" until the last step:
+     "Name of a friend".
+  3. "Take picture".
+  4. Drag the frame ONLY around the letters of the name -- not the
+     orange "i" behind it, not the clan below, not the number in
+     front.
+  5. "Save". The tool asks for the name. Type it as you will write
+     it later in Discord, for example  Lisa .
+
+  Once per friend -- as many friends as you like.
+
+
+===================================================================
+  CHECKING THAT IT WORKED
+===================================================================
+
+  Start the bot (run.bat) and type in Discord:
+
+      !start dungeon 1
+
+  If a required picture is still missing, the bot answers "Could
+  not start" and names it, for example nameplate_me. Just catch up.
+
+
+===================================================================
+  OWN EVENT ITEMS (since 2.3, optional)
+===================================================================
+
+  If the bot should ALWAYS take something in the hammer event that
+  it does not know yet (for example arena tickets), capture it:
+
+  1. In the event, uncover a vase with a magnifier so the item in
+     the glass vase can be seen.
+  2. In capture.bat choose "Own event item 1" (up to 10).
+  3. Frame ONLY the item in the vase -- not the glass rim.
+
+  If the picture is not perfect, the bot cuts it again by itself
+  during the event (file ..._auto). Nothing else to do.
+
+
+===================================================================
+  ARENA: YOUR OWN OPPONENT LISTS AND EMBLEMS (since 3.0 / 3.1, optional)
+===================================================================
+
+  How to put opponents into your lists (never, avoid, safe, doable,
+  clans) is explained in templates\arena\gegner\LIESMICH.txt (bottom
+  half in English): take a picture of the pyramid, frame the NAME in
+  the shield, then "Other picture..." and type e.g. ar_sicher_1.
+
+  New in 3.1:
+  - No name twice in one list: capture.bat compares the picture
+    with all lists. If the player is already in the same list, nothing
+    is saved. If he is in another list, the window asks whether he
+    should move -- the old picture then goes to templates-aussortiert
+    (nothing is deleted).
+  - After a safe or doable picture a window appears: player (as read,
+    please check), your points against him (e.g. 215), the fight
+    duration in seconds and whether he goes on the save-for-later list
+    (then the bot attacks him only in stage 4-5). Leave everything
+    empty = nothing is noted. The entries go to arena-punkte-erzielt.txt
+    and arena-aufheben.txt in the bot folder.
+  - Good emblems: in an opponent's unit window frame the round emblem
+    under the word "Emblem" (only the circle, without the number below)
+    and save it as ar_emblem_gut_1, ar_emblem_gut_2 ... Every unit
+    with such an emblem gives the opponent +3 points.
+
+
+===================================================================
+  WHERE THE PICTURES GO
+===================================================================
+
+      C:\HustleBot\templates\dungeon\
+
+  Yours are called nameplate_me, unit_sacrifice, name_sacrifice,
+  unit_1 to unit_6 and name_1 to name_6. Don't touch the pictures
+  that were already there -- they are measured and fit.
+
+===================================================================

@@ -1,0 +1,53 @@
+===================================================================
+  HUSTLE CASTLE BOT  --  Guide 2 of 5: YOUR OWN PICTURES (capture.bat)
+===================================================================
+  Almost all pictures come with the bot. Only YOUR name and YOUR
+  fighters look different for everyone -- you take those yourself.
+
+  HOW IT WORKS
+  1. Start a dungeon by hand in the game.
+  2. Double-click capture.bat.
+  3. At the top it says which picture is next ("Picture 3 of 15")
+     and where to find it in the game.
+  4. Open that screen in the game, click "Take picture".
+  5. Drag a frame around the spot with the mouse.
+  6. Click "Save and next". Repeat until the bar is full.
+
+  THE BUTTONS
+     Take picture          photographs the game
+     Save and next         cuts out your frame, goes on
+     Skip                  leave this picture out
+     < Back                redo the last one
+     Picture from file...  use a saved screenshot instead
+
+  REQUIRED (without them the dungeon does not start)
+     Your player name        the name tag at the bottom of the
+                             dungeon map
+     Sacrifice fighter face  the fighter you give up first at the
+                             sacrifice altar (squad screen)
+  REQUIRED FOR THE ARENA
+     Arena: your name        your name in your own shield in the
+                             tournament pyramid (only visible in a
+                             running tournament)
+  OPTIONAL, BUT RECOMMENDED
+     Fighter 1 to 6          face and name of your fighters, most
+                             important first (revived first,
+                             sacrificed last). Fewer than six: Skip.
+
+  THE RULES FOR GOOD PICTURES
+     - Frame tightly: for a name only the letters, for a fighter
+       only head and shoulders.
+     - Nothing that moves: no health bars, no numbers, no effects.
+     - Wait until no animation runs.
+     - Don't take fighters in the cathedral -- only in the dungeon.
+     - A picture can be taken again any time; the old one is
+       replaced.
+
+===================================================================
+  All guides:
+     GUIDE-1-SETUP-EN.txt
+     GUIDE-2-PICTURES-EN.txt
+     GUIDE-3-COMMANDS-EN.txt
+     GUIDE-4-ARENA-EN.txt
+     GUIDE-5-EVENT-EN.txt
+===================================================================

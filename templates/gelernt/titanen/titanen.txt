@@ -1,0 +1,41 @@
+﻿thundersaurus	Thundersaurus	archer
+last_guardian	Last Guardian	archer
+medusa	Medusa	archer
+torturer	Torturer	archer
+tormentress	Tormentress	tank
+pandemon	Pandemon	archer
+tide_warrior	Tide Warrior	tank
+chief	Chief	tank
+keeper_of_stars	Keeper of Stars	archer
+steel_deer	Steel Deer	archer
+heavyweight	Heavyweight	archer
+holiday_horror	Holiday Horror	archer
+peepers	Peepers	archer
+carrotinator	Carrotinator	archer
+sea_king	Sea King	archer
+fiery_mantis	Fiery Mantis	tank
+polar_colossus	Polar Colossus	archer
+terror_of_the_tides	Terror of the Tides	tank
+hammerhand	Hammerhand	tank
+sabrehand	Sabrehand	tank
+boulder	Boulder	tank
+soul_eater	Soul Eater	tank
+shadow_spawn	Shadow Spawn	archer
+lightbringer	Lightbringer	tank
+swamp_colossus	Swamp Colossus	tank
+spirit_of_vengeance	Spirit of Vengeance	tank
+igniter	Igniter	tank
+cycloceros	Cycloceros	archer
+thrall	Thrall	tank
+tusk	Tusk	archer
+moving_castle	Moving Castle	archer
+octogrip	Octogrip	tank
+root_beard	Root Beard	tank
+bridge_guardian	Bridge Guardian	archer
+ogre	Ogre	tank
+flamewing	Flamewing	tank
+gamakichi	Gamakichi	archer
+mechwolf	Mechwolf	tank
+mountain	Mountain	archer
+crystal	Crystal	tank
+sea_wolf	Sea Wolf	tank

@@ -1,0 +1,7 @@
+Absichtlich leer. Gegner, die der Bot in der Arena selbst lernt, legt er im
+Ordner gelernt\arena\gegner neben dem Bot ab (nicht hier). Eigene Listen:
+siehe templates\arena\gegner\LIESMICH.txt
+
+Empty on purpose. Opponents the bot learns by itself in the arena are saved
+in the folder gelernt\arena\gegner next to the bot (not here). Own lists:
+see templates\arena\gegner\LIESMICH.txt

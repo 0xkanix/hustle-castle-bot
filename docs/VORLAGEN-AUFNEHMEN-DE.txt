@@ -1,0 +1,290 @@
+===================================================================
+  DEINE EIGENEN BILDER AUFNEHMEN
+===================================================================
+
+  IN KURZ
+
+  1. Hustle Castle starten, ein Verlies anfangen.
+  2. capture.bat doppelklicken.
+  3. Das Fenster sagt dir oben, welches Bild dran ist und wo du
+     es findest. Genau das im Spiel aufmachen.
+  4. "Bild machen" -> mit der Maus einen Rahmen ziehen ->
+     "Speichern und weiter".
+  5. Das wiederholst du, bis der Balken unten voll ist.
+
+  Fertig. Das ist einmalige Arbeit, danach nie wieder -- ausser du
+  tauschst deine Kaempfer aus.
+
+
+===================================================================
+  WARUM UEBERHAUPT
+===================================================================
+
+  Der Bot ist blind. Er vergleicht den Bildschirm mit kleinen
+  gespeicherten Bildausschnitten und klickt dorthin, wo er einen
+  wiedererkennt.
+
+  Fast alle diese Ausschnitte sind schon dabei: Knoepfe, Symbole,
+  Ziffern, Fenster. Die sehen bei jedem Spieler gleich aus.
+
+  Deine Kaempfer und dein Spielername aber nicht. Die musst du
+  selbst aufnehmen, sonst erkennt der Bot dein Team nicht.
+
+  Umbenennen musst du dafuer im Spiel NICHTS. Du fotografierst
+  deine Kaempfer so, wie sie sind. Welcher davon wie wichtig ist,
+  sagst du dem Bot ueber die Reihenfolge im Werkzeug.
+
+
+===================================================================
+  WAS DU AUFNEHMEN MUSST
+===================================================================
+
+  PFLICHT -- ohne diese zwei startet das Verlies nicht:
+
+      Dein Spielername          steht auf der Verlieskarte
+      Opfer-Kaempfer: Gesicht   der Kaempfer, den du am Opferaltar
+                                am ehesten hergibst
+
+  FREIWILLIG, aber sehr zu empfehlen:
+
+      Opfer-Kaempfer: Name      der Name unter demselben Kaempfer
+      Kaempfer 1 bis 6          deine Kaempfer nach Wichtigkeit,
+                                jeweils Gesicht und Name
+
+  Kaempfer 1 ist dein wichtigster. Er wird zuerst wiederbelebt,
+  zuletzt geopfert und geht im Zweikampf als Erster nach oben.
+  Kaempfer 2 ist der zweitwichtigste, und so weiter.
+
+  Hast du weniger als sechs Kaempfer? Dann klickst du bei den
+  uebrigen einfach auf "Ueberspringen".
+
+  Die Kathedrale braucht keine eigenen Bilder. Mit Kaempfer 1 bis 4
+  belebt sie aber gefallene Kaempfer wieder -- ohne diese Bilder
+  laesst sie sie liegen.
+
+  FUER DIE ARENA (nur wenn du !start arena nutzt) -- PFLICHT:
+
+      Arena: dein Name          dein Name im EIGENEN Schild der
+                                Pyramide im Turnier
+
+  Nur die Buchstaben deines Namens einrahmen -- ohne den Clan
+  darunter und ohne Rahmen. Ohne dieses Bild startet die Arena
+  nicht. Liest der Bot deinen Namen trotzdem nicht, schreib ihn in
+  die erste Zeile einer neuen Textdatei arena-name.txt im Bot-Ordner.
+
+
+===================================================================
+  WO DU DIE BILDER FINDEST
+===================================================================
+
+  Alle Bilder kommen aus dem Verlies. Starte dafuer einmal von
+  Hand ein Verlies -- dort gibt es beide Bildschirme:
+
+  1. DIE VERLIESKARTE
+     Auf der Karte stehen unten zwei Namensschilder, deins und
+     das deines Mitspielers.
+     Von hier: "Dein Spielername".
+
+  2. DIE AUFSTELLUNG VOR EINEM KAMPF
+     Oben steht "Drag and drop dwellers to form your squad",
+     unten stehen deine Kaempfer in einer Reihe, jeder mit Gesicht
+     und Name darunter.
+     Von hier: alle Kaempfer.
+
+  3. DIE ARENA-PYRAMIDE (nur fuer die Arena)
+     Gibt es nur in einem laufenden Turnier: Turnier von Hand
+     anfangen, bis die zehn Schilder da sind (oben rechts "Select
+     the next opponent"). Dein eigenes Schild suchen.
+     Von hier: "Arena: dein Name".
+
+  Nimm die Kaempfer bitte NICHT in der Kathedrale auf. Dort sieht
+  die Reihe aehnlich aus, aber ob die Namen genauso aussehen, ist
+  nicht sicher -- und gebraucht werden sie im Verlies.
+
+  Das Werkzeug sagt dir bei jedem Bild dazu, auf welchem der zwei
+  Bildschirme es liegt. Musst du wechseln, macht es die Flaeche
+  leer, damit du nicht aus Versehen im alten Foto herumrahmst.
+
+
+===================================================================
+  SO GEHT ES, SCHRITT FUER SCHRITT
+===================================================================
+
+  1. Hustle Castle starten und zu einem der zwei Bildschirme oben
+     gehen.
+
+  2. Im Ordner C:\HustleBot  capture.bat  doppelklicken.
+     Es gehen zwei Fenster auf: ein schwarzes (das gehoert dazu,
+     einfach offen lassen) und das Werkzeug "Bilder aufnehmen".
+
+  3. Oben im Werkzeug steht, was gerade dran ist, zum Beispiel:
+
+         Bild 3 von 15:   Kaempfer 1: Gesicht
+
+     Darunter steht in einem Satz, was du einrahmen sollst und auf
+     welchem Bildschirm es zu finden ist.
+
+  4. Mach im Spiel genau diesen Bildschirm auf. Dann im Werkzeug
+     auf "Bild machen". Jetzt siehst du dein Spiel im Fenster.
+
+  5. Zieh mit der Maus einen Rahmen um die Stelle: Maustaste
+     druecken, ziehen, loslassen. Falsch gezogen? Einfach nochmal
+     ziehen, der alte Rahmen ist dann weg.
+
+  6. Auf "Speichern und weiter". Das Werkzeug springt von selbst
+     zum naechsten Bild.
+
+  7. Weiter bei 4, bis der Balken unten voll ist. Dort steht immer,
+     wie viele von wie vielen du schon hast.
+
+  DIE KNOEPFE
+
+      Bild machen             fotografiert das Spiel
+      Speichern und weiter    schneidet den Rahmen aus und geht
+                              zum naechsten Bild
+      Ueberspringen           dieses Bild auslassen (etwa wenn du
+                              keinen sechsten Kaempfer hast)
+      < Zurueck               ein Bild zurueck, zum Beispiel um
+                              eins neu aufzunehmen
+      Bild aus Datei...       nimmt einen gespeicherten Screenshot
+                              statt des laufenden Spiels
+      Anderes Bild...         nur fuer Fortgeschrittene
+
+  Ein Bild, das du schon hast, erkennst du oben am Haken. Du
+  kannst es jederzeit neu aufnehmen -- das alte wird ersetzt.
+
+
+===================================================================
+  WORAUF ES ANKOMMT
+===================================================================
+
+  ENG RAHMEN, ABER NICHTS ABSCHNEIDEN
+      Beim Namen nur die Buchstaben, beim Kaempfer nur das
+      Gesicht. Faustregel: Was im Rahmen ist, muss IMMER gleich
+      aussehen.
+
+  NICHTS BEWEGLICHES MITNEHMEN
+      Keine Lebensbalken, keine Zahlen, die sich aendern, keine
+      blinkenden Effekte.
+
+  BEIM GESICHT DEN KOPF NEHMEN
+      Kopf und Schultern reichen. Ruestung und Waffen aendern
+      sich, sobald du etwas umziehst.
+
+  NICHT WAEHREND EINER ANIMATION
+      Warte, bis sich nichts mehr bewegt, dann erst "Bild machen".
+
+  IMMER IM SELBEN SPIELZUSTAND
+      Sprache auf Englisch, HD-Grafik AUS, VSync aus, Spiel im
+      Fenstermodus. Genau wie in GUIDE-1-SETUP-EN.txt Schritt 2. Nimmst
+      du die Bilder mit anderen Einstellungen auf, passen sie
+      spaeter nicht.
+
+
+===================================================================
+  MIT EINEM FREUND SPIELEN  (freiwillig)
+===================================================================
+
+  Willst du mit einem bestimmten Freund ins Verlies
+
+      !start dungeon 10 lisa
+
+  dann braucht der Bot EINMAL ein Bild von dessen Namen. Daran
+  findet er ihn in deiner Freundesliste -- auch wenn er weiter
+  unten steht, der Bot blaettert selbst.
+
+  1. Im Spiel ins Verlies, "Participate", dann bei der
+     Mitspielersuche auf "Friend". Jetzt steht deine
+     Freundesliste da.
+  2. capture.bat oeffnen und mit "Ueberspringen" bis zum
+     letzten Schritt klicken: "Name eines Freundes".
+  3. "Bild machen".
+  4. Rahmen NUR um die Buchstaben des Namens ziehen -- nicht um
+     das orange "i" dahinter, nicht um den Clan darunter und
+     nicht um die Nummer davor.
+  5. "Speichern". Jetzt fragt das Werkzeug nach dem Namen. Tipp
+     ihn so ein, wie du ihn spaeter in Discord schreiben willst,
+     zum Beispiel  Lisa .
+
+  Fuer jeden Freund einmal -- so viele Freunde, wie du willst.
+  Einfach noch einen Rahmen ziehen und wieder speichern.
+
+  Die 10 im Befehl oben ist die Zahl der Durchlaeufe, keine
+  Grenze. Die Nummer vorne in der Liste taugt uebrigens nicht zum
+  Wiederfinden: Die Liste ist nach Staerke sortiert, und wer
+  staerker wird, rutscht nach oben.
+
+
+===================================================================
+  PRUEFEN, OB ES GEKLAPPT HAT
+===================================================================
+
+  Starte den Bot (run.bat) und tippe in Discord:
+
+      !start dungeon 1
+
+  Fehlt noch ein Pflichtbild, antwortet der Bot mit
+  "Konnte nicht starten" und nennt es beim Namen, zum Beispiel
+  nameplate_me. Dann einfach nachholen.
+
+  Wenn der Bot spaeter deine Kaempfer nicht findet, nimm die
+  betreffenden Bilder neu auf -- enger gerahmt, ohne bewegliche
+  Teile.
+
+
+===================================================================
+  EIGENE EVENT-MOTIVE (seit 2.3, freiwillig)
+===================================================================
+
+  Soll der Bot im Hammer-Event etwas IMMER mitnehmen, das er noch
+  nicht kennt (zum Beispiel Arena-Tickets), nimm es selbst auf:
+
+  1. Im Event eine Vase mit der Lupe aufdecken, sodass das Teil
+     in der Glasvase zu sehen ist.
+  2. In capture.bat "Eigenes Event-Motiv 1" (bis 10) waehlen.
+  3. NUR das Teil in der Vase einrahmen -- nicht den Glasrand.
+
+  Ist das Bild nicht ganz sauber, schneidet der Bot es im Event
+  selbst nach (Datei ..._auto). Du musst nichts weiter tun.
+
+
+===================================================================
+  ARENA: EIGENE GEGNER-LISTEN UND EMBLEME (seit 3.0 / 3.1, freiwillig)
+===================================================================
+
+  Wie du Gegner in deine Listen aufnimmst (niemals, meiden, sicher,
+  machbar, Clans), steht in templates\arena\gegner\LIESMICH.txt:
+  Pyramide fotografieren, Rahmen um den NAMEN im Schild, dann
+  "Anderes Bild..." und z. B. ar_sicher_1 eintippen.
+
+  Neu in 3.1:
+  - Kein Name zweimal in einer Liste: capture.bat vergleicht das
+    Bild mit allen Listen. Steht der Spieler schon in derselben Liste,
+    wird nichts gespeichert. Steht er in einer anderen, fragt das
+    Fenster, ob er umziehen soll -- die alte Aufnahme kommt dann nach
+    templates-aussortiert (geloescht wird nichts).
+  - Nach einem sicher- oder machbar-Bild kommt ein Fenster: Spieler
+    (so gelesen, bitte pruefen), deine Punkte gegen ihn (z. B. 215),
+    die Kampfdauer in Sekunden und ob er auf die Aufheben-Liste soll
+    (dann greift ihn der Bot erst in Stage 4-5 an). Alles leer lassen
+    = nichts eintragen. Die Angaben landen in arena-punkte-erzielt.txt
+    und arena-aufheben.txt im Bot-Ordner.
+  - Gute Embleme: im Einheiten-Fenster eines Gegners das runde Emblem
+    unter dem Wort "Emblem" einrahmen (nur den Kreis, ohne die Zahl
+    darunter) und als ar_emblem_gut_1, ar_emblem_gut_2 ... speichern.
+    Jede Einheit mit so einem Emblem bringt dem Gegner +3 Punkte.
+
+
+===================================================================
+  WO DIE BILDER LANDEN
+===================================================================
+
+      C:\HustleBot\templates\dungeon\
+
+  Deine heissen dort nameplate_me, unit_sacrifice, name_sacrifice,
+  unit_1 bis unit_6 und name_1 bis name_6.
+
+  Ruehr nichts an den Bildern an, die schon da waren. Die sind
+  ausgemessen und passen.
+
+===================================================================
