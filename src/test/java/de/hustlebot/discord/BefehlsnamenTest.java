@@ -32,7 +32,7 @@ class BefehlsnamenTest {
             // 24.10.
             "!glyphs", "!glyph",
             // 25.11.
-            "!throneroom");
+            "!throneroom", "!arenacathedral");
 
     @Test
     void ersterNameJederGruppeIstEnglisch() {

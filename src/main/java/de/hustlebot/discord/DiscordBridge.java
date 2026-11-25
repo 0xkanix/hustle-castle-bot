@@ -595,6 +595,8 @@ public final class DiscordBridge {
                 case "!arenareserve" -> arenaReserve(rest);
                 // Nutzer 25.11.: Thronsaal-Stufe von Hand (sonst liest sie der Team-Scan); TS8 = einfache Arena-Strategie.
                 case "!throneroom", "!thronsaal", "!ts" -> thronsaal(rest);
+                // Nutzer 25.11.: Kathedrale in der Arena-Wartezeit (nach dem eigenen Angriff, Stage 1-4).
+                case "!arenacathedral", "!arenakathedrale" -> arenaKathedraleSchalter(rest);
                 case "!arenabericht", "!arenareport", "!arenastatistik", "!arenastats" -> arenaBerichtSchalter(rest);
                 case "!notizen", "!notizblock", "!notes" -> notizen();
                 case "!notiz", "!note" -> notiz(kanal, rest);
@@ -1538,6 +1540,20 @@ public final class DiscordBridge {
                                 + "Modes this level does not have yet are skipped (e.g. Dungeon from 9).\n`!throneroom 8` sets the level.",
                         "Arena-Strategie: " + (einfach ? "einfach (nur die eigene Bilanz je Gegner)" : "voll (Kraft, Sets, Pruefungen)") + ".\n"
                                 + "Modi, die es auf dieser Stufe noch nicht gibt, werden uebersprungen (z. B. Verlies ab 9).\n`!thronsaal 8` setzt die Stufe."),
+                DiscordClient.FARBE_INFO);
+    }
+
+    /** "!arenakathedrale an/aus": Kathedrale in der Arena-Wartezeit (arena-kathedrale.txt). */
+    private void arenaKathedraleSchalter(String rest) {
+        String w = rest == null ? "" : rest.trim().toLowerCase(Locale.ROOT);
+        var schalter = de.hustlebot.bot.ArenaMode.KATHEDRALE_AUSFLUG;
+        if (de.hustlebot.core.Schalterdatei.istAn(w)) schalter.setzen(true, Sprache.t("set with !arenacathedral on", "gesetzt mit !arenakathedrale an"));
+        else if (de.hustlebot.core.Schalterdatei.istAus(w)) schalter.setzen(false, Sprache.t("set with !arenacathedral off", "gesetzt mit !arenakathedrale aus"));
+        client.sendCard(Sprache.t("Cathedral in the arena waiting time: ", "Kathedrale in der Arena-Wartezeit: ") + anAus(schalter.lesen()),
+                Sprache.t("After its own attack (stages 1-4) the bot closes the tournament window, plays the cathedral and is back in time "
+                                + "for the next stage. The cathedral journey stays open in between.\n`!arenacathedral on` · `!arenacathedral off`",
+                        "Nach dem eigenen Angriff (Stage 1-4) schliesst der Bot das Turnierfenster, spielt Kathedrale und ist rechtzeitig "
+                                + "zur naechsten Stage zurueck. Die Kathedralen-Reise bleibt dazwischen offen.\n`!arenakathedrale an` · `!arenakathedrale aus`"),
                 DiscordClient.FARBE_INFO);
     }
 

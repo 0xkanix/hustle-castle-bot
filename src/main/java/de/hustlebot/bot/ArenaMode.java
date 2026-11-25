@@ -405,6 +405,29 @@ public final class ArenaMode implements GameMode {
     private long burgenRueckwegSeit;
     /** So viel Zeit bis zur naechsten Stage muss nach dem eigenen Angriff mindestens bleiben (eine Burg samt Rueckweg). */
     static final long BURGEN_MIN_REST_MS = 75_000;
+
+    // --- Kathedrale in der Wartezeit (Nutzer 25.11.) ---------------------------------------------------------------------
+    // "Arena und Kathedrale parallel": nach dem eigenen Angriff (Stage 1-4) Turnierfenster zu, Kathedrale spielen, rechtzeitig
+    // zurueck -- gebaut wie der Burgen-Ausflug. Die Kathedrale darf man mitten im Lauf verlassen (Home), die Reise bleibt offen;
+    // Kaempfe dort dauern unter 5 s (Nutzer 25.11.). Schalter arena-kathedrale.txt / !arenacathedral, Standard aus.
+    // ACHTUNG Autor 11.10.: "Niemals waehrend dem Warten auf Arena [Kathedrale spielen]" -- gemeint war die WARTESCHLANGE
+    // (Turnierbeginn unbekannt). Hier nur nach dem eigenen Angriff, wo das Rundenende bekannt ist.
+    public static final de.hustlebot.core.Schalterdatei KATHEDRALE_AUSFLUG =
+            new de.hustlebot.core.Schalterdatei(de.hustlebot.core.Ordner.bei("arena-kathedrale.txt"), "Kathedrale in der Arena-Wartezeit", false);
+    private final CathedralMode kathedrale = new CathedralMode();
+    /** Eigener Zaehler je Ausflug (frische Leerlauf-Uhr): Kathedralen-Runs zaehlen nicht als Turniere. */
+    private RunTracker kathedraleRuns = new RunTracker(1_000_000);
+    /** Kathedralen-Runs seit dem Start der Arena (fuer das Protokoll). */
+    private int kathedraleRunsGesamt;
+    private boolean kathedraleAusflug;
+    /** Bis wann die Kathedrale gespielt wird; danach Rueckweg (Home -> Map -> Arena). */
+    private long kathedraleBis;
+    /** Die Kathedrale ist fuer diesen Start fertig (keine Schluessel o. ae.) -- keine Ausfluege mehr. */
+    private boolean kathedraleLeer;
+    /** Mindestens so viel Zeit bis zum Rundenende nach dem eigenen Angriff (Hinweg + ein paar Kaempfe). */
+    static final long KATHEDRALE_MIN_REST_MS = 30_000;
+    /** So viel vor dem Ende der Ueberzeit (AUSFLUG_UEBERZEIT_MS) hoert die Kathedrale auf -- Zeit fuer den Rueckweg. */
+    static final long KATHEDRALE_RUECKWEG_MS = 20_000;
     /** Was in diesem Turnier geprueft wurde, nach Vergleichsform des Namens. */
     private final java.util.Map<String, ArenaPruefer.Ergebnis> pruefungen = new java.util.HashMap<>();
     /**
@@ -1454,6 +1477,9 @@ public final class ArenaMode implements GameMode {
         pruefer.tempoSetzen(tempo);   // Autor 24.10.: Arena-Tempo auch fuer das doppelte Gegenlesen
         burgenAusflug = false;
         burgenRueckwegSeit = 0;
+        kathedraleAusflug = false;
+        kathedraleLeer = false;
+        kathedraleRunsGesamt = 0;
         java.util.Arrays.fill(platzierungen, 0);
         wechselErbeten = false;
         wechselBereit = false;
@@ -1797,6 +1823,7 @@ public final class ArenaMode implements GameMode {
         // Runde geblaettert -- wer noch fehlt oder Luecken hatte, wird dabei (erneut) angesehen.
         allesErkundet = false;
         rundeGespielt = false;
+        long endeVorher = rundenendeErwartet;
         rundenendeErwartet = 0;
         angriffsphaseSeit = 0;
         quickFehltSeit = 0;
@@ -1812,8 +1839,17 @@ public final class ArenaMode implements GameMode {
         offenesErgebnisEintragen();   // nichts aus der alten Runde verlieren
         ergebnisGemeldet = false;
         zuletztHaekchen = -1;
-        rundeSeit = System.currentTimeMillis();
+        rundeSeit = rundeBegannUm(endeVorher, System.currentTimeMillis());
         uhrVergessen();
+    }
+
+    /**
+     * Wann die neue Runde wirklich begann. Kommt der Bot erst spaet von einem Ausflug zurueck (Burgen, Kathedrale), merkt er den
+     * Rundenwechsel verspaetet -- die eigene Rundenuhr (RUNDE_SPAETESTENS_MS) liefe dann zu spaet. War das Ende der alten Runde
+     * bekannt und liegt es hoechstens zwei Minuten zurueck, gilt es als Beginn der neuen (Nutzer 25.11., Kathedralen-Ausflug).
+     */
+    static long rundeBegannUm(long endeVorher, long jetzt) {
+        return endeVorher > 0 && endeVorher < jetzt && jetzt - endeVorher <= 120_000 ? endeVorher : jetzt;
     }
 
     // ==================================================================
@@ -1876,6 +1912,10 @@ public final class ArenaMode implements GameMode {
         // Burgen in der Wartezeit (Autor 25.10.): waehrend des Ausflugs gehoert jeder Schritt dem Burgen-Modus.
         if (burgenAusflug) {
             Outcome o = burgenSchritt(screen, ctx, runs);
+            if (o != null) return o;
+        }
+        if (kathedraleAusflug) {
+            Outcome o = kathedraleSchritt(screen, ctx, runs);
             if (o != null) return o;
         }
 
@@ -3309,6 +3349,13 @@ public final class ArenaMode implements GameMode {
         return fotoKontext.matcher().has(T_CLOSE_X);
     }
 
+    /**
+     * So lange darf ein Ausflug in der Wartezeit hoechstens ueber das erwartete Rundenende gehen (Nutzer 25.11.: "40 s sind
+     * ein bisschen zu wenig -- eine Minute"; vorher 40 s). Der eigene Angriff der naechsten Runde kommt ohnehin spaet
+     * (spaetestensS vor Rundenende), eine Minute nach Rundenbeginn bleibt also Zeit.
+     */
+    static final long AUSFLUG_UEBERZEIT_MS = 60_000L;
+
     /** Nach dem eigenen Angriff ("Next stage in"): reicht die Zeit, Turnierfenster zu und zu den Burgen. */
     private Outcome burgenAusflugStarten(Mat screen, BotContext ctx) {
         if (!rundeGespielt || rundenendeErwartet <= 0 || !burgenWunsch(rundeZuletzt)) return null;
@@ -3332,14 +3379,75 @@ public final class ArenaMode implements GameMode {
     /** Ein Schritt des Ausflugs; null = vorbei, die Arena macht mit diesem Bild weiter. */
     private Outcome burgenSchritt(Mat screen, BotContext ctx, RunTracker runs) {
         Outcome o = burgen.step(screen, ctx, runs);
-        // Sicherung: 40 s ueber der Frist ist der Ausflug auf jeden Fall vorbei (die Arena findet von ueberall zurueck).
-        boolean zuLang = System.currentTimeMillis() > rundenendeErwartet + 40_000;
+        // Sicherung: AUSFLUG_UEBERZEIT_MS ueber der Frist ist der Ausflug auf jeden Fall vorbei (die Arena findet von ueberall zurueck).
+        boolean zuLang = System.currentTimeMillis() > rundenendeErwartet + AUSFLUG_UEBERZEIT_MS;
         if (o != Outcome.FINISHED && !zuLang) return o == Outcome.UNKNOWN ? Outcome.WAITING : o;
         burgenAusflug = false;
         burgenRueckwegSeit = System.currentTimeMillis();
         if (burgen.alleErledigt()) de.hustlebot.core.Burgenplan.angestossen();
         Log.info("Arena", Sprache.t("Castles done" + (burgen.alleErledigt() ? " (no enemies left)" : " for now") + " -- back to the tournament.",
                 "Burgen " + (burgen.alleErledigt() ? "fertig (keine Gegner mehr)" : "fuer diese Wartezeit fertig") + " -- zurueck zum Turnier."));
+        return Outcome.ACTED;
+    }
+
+    /**
+     * Kathedrale in dieser Wartezeit? Schalter an, Stage 1-4 (nach Stage 5 endet das Turnier), Kathedrale auf diesem Thronsaal
+     * vorhanden, nicht schon leer, nicht im Event-Kreislauf (der setzt beim Start der Kathedrale ein Event in Gang).
+     */
+    static boolean kathedraleErlaubt(boolean schalter, int runde, boolean leer, boolean thronsaalFrei, boolean eventKreislauf, boolean nurZuEnde) {
+        return schalter && runde >= 1 && runde < LETZTE_RUNDE && !leer && thronsaalFrei && !eventKreislauf && !nurZuEnde;
+    }
+
+    /** Bis wann gespielt werden darf: Rundenende + Ueberzeit - Rueckweg. */
+    static long kathedraleFrist(long rundenende) {
+        return rundenende + AUSFLUG_UEBERZEIT_MS - KATHEDRALE_RUECKWEG_MS;
+    }
+
+    /** Nach dem eigenen Angriff ("Next stage in"): Turnierfenster zu, Kathedrale bis kurz vor Ende der Ueberzeit. */
+    private Outcome kathedraleAusflugStarten(Mat screen, BotContext ctx) {
+        if (!rundeGespielt || rundenendeErwartet <= 0) return null;
+        if (!kathedraleErlaubt(KATHEDRALE_AUSFLUG.lesen(), rundeZuletzt, kathedraleLeer,
+                !de.hustlebot.core.Thronsaal.fehltJetzt(de.hustlebot.core.Thronsaal.Teil.KATHEDRALE),
+                de.hustlebot.core.Eventautomatik.istAn(), nurZuEndeSpielen)) return null;
+        // Wie beim Burgen-Ausflug: erst, wenn das Kampfergebnis gelesen ist.
+        if (imKampfGegen != null || ergebnisSeit != 0 || System.currentTimeMillis() - angriffGeklicktUm < 15_000) return null;
+        long rest = rundenendeErwartet - System.currentTimeMillis();
+        if (rest < KATHEDRALE_MIN_REST_MS) return null;
+        long bis = kathedraleFrist(rundenendeErwartet);
+        if (!ctx.clickIfVisibleIfKnown(screen, T_CLOSE_X, Sprache.t("Close the tournament window -- cathedral in the waiting time ("
+                        + (bis - System.currentTimeMillis()) / 1000 + " s)",
+                "Turnierfenster zu -- Kathedrale in der Wartezeit (" + (bis - System.currentTimeMillis()) / 1000 + " s)"))) {
+            return null;
+        }
+        // Jeder Ausflug beginnt frisch: die Kathedrale liest Etage und Lage selbst vom Bildschirm (Sockel), eine offene
+        // Reise wird von der Etagenkarte aus weitergespielt.
+        kathedrale.reset();
+        kathedraleRuns = new RunTracker(1_000_000);
+        kathedraleAusflug = true;
+        kathedraleBis = bis;
+        ctx.sleepUntilChanged(2000);
+        return Outcome.ACTED;
+    }
+
+    /** Ein Schritt der Kathedrale; null = Ausflug vorbei, die Arena macht mit diesem Bild weiter (Rueckweg in hinweg). */
+    private Outcome kathedraleSchritt(Mat screen, BotContext ctx, RunTracker runs) {
+        boolean zeitUm = System.currentTimeMillis() >= kathedraleBis;
+        Outcome o = zeitUm ? null : kathedrale.step(screen, ctx, kathedraleRuns);
+        if (o == Outcome.PAUSE) return o;   // anderes Geraet: der Mensch ist dran
+        if (o == Outcome.ACTED) runs.progress(Sprache.t("Cathedral in the arena waiting time", "Kathedrale in der Arena-Wartezeit"));
+        if (o != null && o != Outcome.FINISHED && o != Outcome.FATAL) return o == Outcome.UNKNOWN ? Outcome.WAITING : o;
+        kathedraleAusflug = false;
+        kathedraleRunsGesamt += kathedraleRuns.completedRuns();
+        burgenRueckwegSeit = System.currentTimeMillis();   // derselbe Rueckweg wie nach den Burgen
+        if (o == Outcome.FINISHED || o == Outcome.FATAL) {
+            kathedraleLeer = true;
+            String grund = kathedrale.endeHinweis();
+            Log.info("Arena", Sprache.t("Cathedral finished for this start" + (grund != null ? " (" + grund + ")" : "") + " -- no more cathedral in the waiting time.",
+                    "Kathedrale fuer diesen Start fertig" + (grund != null ? " (" + grund + ")" : "") + " -- keine Kathedrale mehr in der Wartezeit."));
+        } else {
+            Log.info("Arena", Sprache.t("Cathedral paused -- back to the tournament (" + kathedraleRunsGesamt + " cathedral run(s) so far).",
+                    "Kathedrale unterbrochen -- zurueck zum Turnier (bisher " + kathedraleRunsGesamt + " Kathedralen-Run(s))."));
+        }
         return Outcome.ACTED;
     }
 
@@ -3356,6 +3464,18 @@ public final class ArenaMode implements GameMode {
                         inselGeklicktUm = System.currentTimeMillis();
                         return Outcome.ACTED;
                     }
+                }
+                // Aus der Kathedrale (Nutzer 25.11.): Etagenkarte -> "Home" unten links (wie BotEngine.heimGehen), sonst der gruene
+                // Home. Die Reise bleibt dabei offen ("End journey" ruehrt der Bot hier nicht an).
+                if (System.currentTimeMillis() - karteGeklicktUm >= 3000 && ctx.visibleIfKnown(screen, "dc_floor_hint")) {
+                    Weltkarte.heim(screen, ctx, Sprache.t("Home (out of the cathedral, back to the arena)", "Heim (aus der Kathedrale, zurueck zur Arena)"));
+                    karteGeklicktUm = System.currentTimeMillis();
+                    ctx.sleepUntilChanged(2000);
+                    return Outcome.ACTED;
+                }
+                if (ctx.clickIfVisible(screen, T_HOME_BUTTON, Sprache.t("Home (back to the arena)", "Heim (zurueck zur Arena)"))) {
+                    ctx.sleepUntilChanged(2000);
+                    return Outcome.ACTED;
                 }
                 if (System.currentTimeMillis() - karteGeklicktUm >= 3000
                         && (ctx.clickIfVisible(screen, T_MAP_BUTTON, Sprache.t("To the world map (back to the arena)", "Zur Weltkarte (zurueck zur Arena)"))
@@ -3975,6 +4095,8 @@ public final class ArenaMode implements GameMode {
             if (vorlageFuer != null) namensbildSpeichern(screen, ctx);
             Outcome b = burgenAusflugStarten(screen, ctx);
             if (b != null) return b;
+            Outcome k = kathedraleAusflugStarten(screen, ctx);
+            if (k != null) return k;
             Outcome n = nachAngriffDurchschauen(screen, ctx);
             return n != null ? n : Outcome.WAITING;
         }
