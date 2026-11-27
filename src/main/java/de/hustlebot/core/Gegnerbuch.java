@@ -89,7 +89,22 @@ public final class Gegnerbuch {
                         int setPunkte, String sets, String geprueft, String dauern,
                         int einheiten, int bauarbeiter, String punkte, String notiz,
                         String steine, String schirm, String pals,
-                        String fingerabdruecke, String schrift) {
+                        String fingerabdruecke, String schrift, String schriftbilder) {
+
+        public Notiz {
+            schriftbilder = schriftbilder == null ? "" : schriftbilder;
+        }
+
+        /** Ohne Schriftbilder (Stand vor dem 21.11.). */
+        public Notiz(String name, String clan, String verlauf,
+                     long staerke, int artefakte, String zuletzt,
+                     int setPunkte, String sets, String geprueft, String dauern,
+                     int einheiten, int bauarbeiter, String punkte, String notiz,
+                     String steine, String schirm, String pals,
+                     String fingerabdruecke, String schrift) {
+            this(name, clan, verlauf, staerke, artefakte, zuletzt, setPunkte, sets, geprueft, dauern, einheiten,
+                    bauarbeiter, punkte, notiz, steine, schirm, pals, fingerabdruecke, schrift, "");
+        }
 
         /**
          * Autor 01.11.: der NAME dieses Eintrags ist der eigene Clan oder ein Stueck davon ("V Myth Gods" / Clan "O'Myth Go s") -- die Clan-Zeile wurde als
@@ -103,7 +118,7 @@ public final class Gegnerbuch {
         /** Kurzform fuer die alten Stellen, die von Sets noch nichts wissen. */
         public Notiz(String name, String clan, String verlauf,
                      long staerke, int artefakte, String zuletzt) {
-            this(name, clan, verlauf, staerke, artefakte, zuletzt, -1, "", "", "", -1, -1, "", "", "", "", "", "", "");
+            this(name, clan, verlauf, staerke, artefakte, zuletzt, -1, "", "", "", -1, -1, "", "", "", "", "", "", "", "");
         }
 
         /**
@@ -117,20 +132,26 @@ public final class Gegnerbuch {
                      int einheiten, int bauarbeiter, String punkte, String notiz,
                      String steine, String schirm, String pals) {
             this(name, clan, verlauf, staerke, artefakte, zuletzt, setPunkte, sets, geprueft, dauern, einheiten,
-                    bauarbeiter, punkte, notiz, steine, schirm, pals, "", "");
+                    bauarbeiter, punkte, notiz, steine, schirm, pals, "", "", "");
         }
 
         /** Dieselbe Notiz mit anderem Namensbild (Fingerabdruecke und Schrift). */
         Notiz mitNamensbild(String fps, String schrift) {
             return new Notiz(name, clan, verlauf, staerke, artefakte, zuletzt, setPunkte, sets, geprueft, dauern,
                     einheiten, bauarbeiter, punkte, notiz, steine, schirm, pals, fps == null ? "" : fps,
-                    schrift == null ? "" : schrift);
+                    schrift == null ? "" : schrift, schriftbilder);
+        }
+
+        /** Dieselbe Notiz mit anderen Schriftbildern (Autor 21.11., siehe Schriftbild). */
+        Notiz mitSchriftbildern(String sb) {
+            return new Notiz(name, clan, verlauf, staerke, artefakte, zuletzt, setPunkte, sets, geprueft, dauern,
+                    einheiten, bauarbeiter, punkte, notiz, steine, schirm, pals, fingerabdruecke, schrift, sb);
         }
 
         /** Dieselbe Notiz mit anderem Verlauf (Autor 28.10., ArenaZusammenfuehren). */
         Notiz mitVerlauf(String v) {
             return new Notiz(name, clan, v, staerke, artefakte, zuletzt, setPunkte, sets, geprueft, dauern, einheiten,
-                    bauarbeiter, punkte, notiz, steine, schirm, pals, fingerabdruecke, schrift);
+                    bauarbeiter, punkte, notiz, steine, schirm, pals, fingerabdruecke, schrift, schriftbilder);
         }
 
         /**
@@ -605,7 +626,7 @@ public final class Gegnerbuch {
         String gelesen = name == null || name.isBlank() ? schriftName(namensbild) : name;
         String c = clan == null ? "" : clan;
         if (keinClan(c) && gelesen != null && NamensVergleich.siehtMenschlichAus(gelesen)) c = OHNE_CLAN;
-        String[] kn = kanonisch(gelesen, c, staerke, fp);
+        String[] kn = kanonisch(gelesen, c, staerke, fp, bilderVon(namensbild));
         if (kn[0] == null || kn[0].isBlank()) return new String[]{name == null ? "" : name, clan == null ? "" : clan};
         String key = schluessel(kn[0], kn[1]);
         Notiz n = notizen.get(key);
@@ -628,9 +649,16 @@ public final class Gegnerbuch {
 
     /** Die Notiz mit dem neuen Fingerabdruck vorn und der Schrift dazu (ohne Namensbild: unveraendert). */
     private static Notiz mitNamensbild(Notiz n, Glyphenschrift.Ergebnis e) {
-        if (n == null || e == null || e.leer() || ArenaSperre.glyphenAnzahl(e.fingerabdruck()) == 0) return n;
-        String fps = ArenaSperre.dazu(n.fingerabdruecke(), e.fingerabdruck());
-        return n.mitNamensbild(fps, sauber(e.text()));
+        if (n == null || e == null) return n;
+        Notiz r = n;
+        if (!e.leer() && ArenaSperre.glyphenAnzahl(e.fingerabdruck()) > 0) {
+            r = r.mitNamensbild(ArenaSperre.dazu(r.fingerabdruecke(), e.fingerabdruck()), sauber(e.text()));
+        }
+        if (e.hatBild()) {
+            String sb = schriftbilderDazu(r.schriftbilder(), e.bilder());
+            if (!sb.equals(r.schriftbilder())) r = r.mitSchriftbildern(sb);
+        }
+        return r;
     }
 
     /**
@@ -673,6 +701,217 @@ public final class Gegnerbuch {
         return glyphen;
     }
 
+    // ---- Schriftbild als Hauptschluessel (Autor 21.11.) -----------------------------------------------------------
+    //
+    // "~ЦИРИ~" (Myth Gods) las die Texterkennung als "-UMPM-", "-ЦИРИ-", "V Myth Gods" -- drei Eintraege, und die Siege
+    // landeten unter "V Myth Gods", der als Clan-Name gar nicht zaehlt. Jetzt hat jeder Eintrag seine Schriftbilder (der
+    // Name als kleines Bild, je Bildschirm-Art bis zu drei) und wird zuerst daran wiedererkannt. Gegenprobe: Kraft
+    // (+/-1,5 %) und Clan. Der Text des Namens ist nur noch Anzeige.
+
+    /** So viele Schriftbilder je Bildschirm-Art bleiben je Notiz (neueste zuerst). */
+    static final int SCHRIFTBILDER_JE_ART = 3;
+
+    /** Autor 21.11.: Gegenprobe Kraft -- hoechstens so viel Unterschied (1,5 %). */
+    static final double KRAFT_TOLERANZ = 0.015;
+
+    /** Entpackte Schriftbilder (Text -> Bild), damit der Vergleich im Speicher bleibt. */
+    private static final Map<String, Schriftbild> BILD_SPEICHER = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Die Schriftbilder eines Ergebnisses (leer bei null). */
+    private static List<Schriftbild> bilderVon(Glyphenschrift.Ergebnis e) {
+        return e == null ? List.of() : e.bilder();
+    }
+
+    /** Die Schriftbilder aus der Spalte "Schriftbilder" ("S...|F...|..."); kaputte fallen weg. */
+    static List<Schriftbild> schriftbilder(String feld) {
+        if (feld == null || feld.isBlank()) return List.of();
+        List<Schriftbild> fertig = LISTEN_SPEICHER.get(feld);
+        if (fertig != null) return fertig;
+        List<Schriftbild> l = entpacken(feld);
+        if (LISTEN_SPEICHER.size() > 5_000) LISTEN_SPEICHER.clear();
+        LISTEN_SPEICHER.put(feld, l);
+        return l;
+    }
+
+    /** Ganze Spalten (Text -> entpackte Liste): das Wiedererkennen laeuft je Schild ueber alle Notizen. */
+    private static final Map<String, List<Schriftbild>> LISTEN_SPEICHER = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static List<Schriftbild> entpacken(String feld) {
+        List<Schriftbild> l = new ArrayList<>();
+        for (String t : feld.split("[|]")) {
+            String k = t.strip();
+            if (k.isEmpty()) continue;
+            Schriftbild b = BILD_SPEICHER.get(k);
+            if (b == null) {
+                b = Schriftbild.lesen(k);
+                if (b == null) continue;
+                if (BILD_SPEICHER.size() > 20_000) BILD_SPEICHER.clear();
+                BILD_SPEICHER.put(k, b);
+            }
+            l.add(b);
+        }
+        return List.copyOf(l);
+    }
+
+    /**
+     * Neue Schriftbilder vorn dazu, je Bildschirm-Art hoechstens SCHRIFTBILDER_JE_ART. Ein Bild, das einem schon
+     * gemerkten fast genau gleicht, kommt nicht doppelt. Hat die Notiz schon Bilder dieser Art, kommt ein neues nur dazu,
+     * wenn es wenigstens AEHNLICH zu einem davon ist -- so bleibt ein falsch zugeordnetes Bild (Texterkennung hat den
+     * Spieler verwechselt) draussen.
+     */
+    static String schriftbilderDazu(String feld, List<Schriftbild> neue) {
+        if (neue == null || neue.isEmpty()) return feld == null ? "" : feld;
+        List<Schriftbild> alt = schriftbilder(feld);
+        List<Schriftbild> l = new ArrayList<>();
+        for (Schriftbild n : neue) {
+            if (n == null) continue;
+            boolean gleicheArt = false, passt = false, doppelt = false;
+            for (Schriftbild a : alt) {
+                if (a.art() != n.art()) continue;
+                gleicheArt = true;
+                Schriftbild.Urteil u = a.urteil(n);
+                passt |= u != Schriftbild.Urteil.NEIN;
+                doppelt |= u == Schriftbild.Urteil.SICHER && a.abstand(n) <= 0.02;
+            }
+            if (doppelt || (gleicheArt && !passt) || l.contains(n)) continue;
+            l.add(n);
+        }
+        if (l.isEmpty()) return feld == null ? "" : feld;
+        l.addAll(alt);
+        return schriftbilderText(l);
+    }
+
+    /** Zwei Spalten zusammen (beim Zusammenlegen): erst die erste, dann die der zweiten, je Art hoechstens drei. */
+    static String schriftbilderVereint(String erste, String zweite) {
+        List<Schriftbild> l = new ArrayList<>(schriftbilder(erste));
+        for (Schriftbild b : schriftbilder(zweite)) if (!l.contains(b)) l.add(b);
+        return schriftbilderText(l);
+    }
+
+    private static String schriftbilderText(List<Schriftbild> l) {
+        Map<Character, Integer> jeArt = new java.util.HashMap<>();
+        StringBuilder sb = new StringBuilder();
+        for (Schriftbild b : l) {
+            int n = jeArt.merge(b.art(), 1, Integer::sum);
+            if (n > SCHRIFTBILDER_JE_ART) continue;
+            if (sb.length() > 0) sb.append('|');
+            sb.append(b.text());
+        }
+        return sb.toString();
+    }
+
+    /** Ergebnis der Gegenprobe zweier Spieler: Kraft und Clan bestaetigen, sagen nichts, oder widersprechen. */
+    enum Gegenprobe { BESTAETIGT, OFFEN, UNBEKANNT, WIDERSPRUCH }
+
+    /**
+     * Autor 21.11.: "Gegenprobe: Clan + Kraft (+/-1,5 %)". Bestaetigt: Kraft passt (und der Clan widerspricht nicht),
+     * oder Clan passt (und die Kraft widerspricht nicht -- eine fehlt). Widerspruch: anderer Clan und andere Kraft, oder
+     * andere Kraft und kein passender Clan. Unbekannt: weder Clan noch Kraft auf beiden Seiten bekannt. Sonst offen (z. B.
+     * gleicher Clan, Kraft gewachsen).
+     */
+    static Gegenprobe gegenprobe(String clanA, long kraftA, String clanB, long kraftB) {
+        boolean kraftBekannt = kraftA > 0 && kraftB > 0;
+        boolean kraftPasst = kraftBekannt && Math.abs(kraftA - kraftB) <= Math.max(kraftA, kraftB) * KRAFT_TOLERANZ;
+        boolean kraftWiderspricht = kraftBekannt && !kraftPasst;
+        boolean clanBekannt = echterClan(clanA) && echterClan(clanB);
+        boolean clanPasst = clanBekannt && (NamensVergleich.gleicherClan(clanA, clanB) || clanAehnlich(clanA, clanB)
+                || nurZeichen(clanA).equals(nurZeichen(clanB)));
+        boolean clanWiderspricht = clanBekannt && !clanPasst;
+        if (kraftPasst && !clanWiderspricht) return Gegenprobe.BESTAETIGT;
+        if (clanPasst && !kraftWiderspricht) return Gegenprobe.BESTAETIGT;
+        if ((clanWiderspricht && !kraftPasst) || (kraftWiderspricht && !clanPasst)) return Gegenprobe.WIDERSPRUCH;
+        return clanBekannt || kraftBekannt ? Gegenprobe.OFFEN : Gegenprobe.UNBEKANNT;
+    }
+
+    /** Das beste Urteil zwischen zwei Bildlisten (nur gleiche Bildschirm-Art) und der Abstand dazu. */
+    record Bildtreffer(Schriftbild.Urteil urteil, double abstand) {
+        static final Bildtreffer KEINER = new Bildtreffer(Schriftbild.Urteil.NEIN, 1);
+
+        boolean besserAls(Bildtreffer o) {
+            return o == null || urteil.ordinal() < o.urteil.ordinal() || (urteil == o.urteil && abstand < o.abstand);
+        }
+    }
+
+    static Bildtreffer bildVergleich(List<Schriftbild> a, List<Schriftbild> b) {
+        Bildtreffer best = Bildtreffer.KEINER;
+        for (Schriftbild x : a) {
+            for (Schriftbild y : b) {
+                if (x.art() != y.art()) continue;
+                double[] v = x.vergleichen(y);
+                Schriftbild.Urteil u = Schriftbild.urteil(v);
+                if (u == Schriftbild.Urteil.NEIN) continue;
+                Bildtreffer t = new Bildtreffer(u, v[0]);
+                if (t.besserAls(best)) best = t;
+            }
+        }
+        return best;
+    }
+
+    /** Glaubt man, dass Bild + Gegenprobe denselben Spieler zeigen? SICHER: wenn Kraft/Clan nicht widersprechen und wenigstens eins davon bekannt ist; AEHNLICH: nur bestaetigt. */
+    static boolean glaubhaft(Bildtreffer t, Gegenprobe g) {
+        return switch (t.urteil()) {
+            case SICHER -> g == Gegenprobe.BESTAETIGT || g == Gegenprobe.OFFEN;   // ohne jede Gegenprobe nicht (Altbestand kann falsche Bilder haben)
+            case AEHNLICH -> g == Gegenprobe.BESTAETIGT;
+            default -> false;
+        };
+    }
+
+    /**
+     * Die Notiz, deren Schriftbilder zu diesen passen (siehe glaubhaft), oder null. Mehrere: das bessere Urteil, dann der
+     * kleinere Abstand, dann mehr Kaempfe.
+     */
+    private Notiz nachSchriftbild(List<Schriftbild> neue, String clan, long staerke) {
+        if (neue == null || neue.isEmpty()) return null;
+        Notiz beste = null;
+        Bildtreffer besterT = null;
+        for (Notiz n : notizen.values()) {
+            if (n.schriftbilder().isBlank()) continue;
+            Bildtreffer t = bildVergleich(schriftbilder(n.schriftbilder()), neue);
+            if (!glaubhaft(t, gegenprobe(n.clan(), n.staerke(), clan, staerke))) continue;
+            if (beste == null || t.besserAls(besterT)
+                    || (t.urteil() == besterT.urteil() && t.abstand() == besterT.abstand() && n.kaempfe() > beste.kaempfe())) {
+                beste = n;
+                besterT = t;
+            }
+        }
+        return beste;
+    }
+
+    /** Fuer bestehende Eintraege (Autor 21.11.: "wo sicher, sonst getrennt"): SICHER gleiches Bild UND bestaetigte Gegenprobe. */
+    private static boolean schriftbildGleich(Notiz a, Notiz b) {
+        if (a.schriftbilder().isBlank() || b.schriftbilder().isBlank()) return false;
+        Bildtreffer t = bildVergleich(schriftbilder(a.schriftbilder()), schriftbilder(b.schriftbilder()));
+        return t.urteil() == Schriftbild.Urteil.SICHER && gegenprobe(a.clan(), a.staerke(), b.clan(), b.staerke()) == Gegenprobe.BESTAETIGT;
+    }
+
+    /**
+     * Einmalig fuer Eintraege von vor dem 21.11.: aus den Namensbildern ihrer Fingerabdruecke (glyphen\namen\<kurz>.png)
+     * Schriftbilder machen. Liest nur. @return wie viele Eintraege Schriftbilder bekamen
+     */
+    private int schriftbilderAusFingerabdruecken() {
+        int n = 0;
+        for (var e : new ArrayList<>(notizen.entrySet())) {
+            Notiz no = e.getValue();
+            if (!no.schriftbilder().isBlank() || no.fingerabdruecke().isBlank()) continue;
+            List<Schriftbild> l = new ArrayList<>();
+            for (String fp : no.fingerabdruecke().split("[|]")) {
+                Path p = glyphen().namensbildGenau(fp.strip());
+                if (p == null) continue;
+                try {
+                    Schriftbild b = Schriftbild.aus(javax.imageio.ImageIO.read(p.toFile()), Schriftbild.SCHILD);
+                    if (b != null) l.add(b);
+                } catch (Exception ex) {
+                    Log.debug("Notizblock", "Namensbild " + p + " nicht lesbar: " + ex.getMessage());
+                }
+            }
+            if (l.isEmpty()) continue;
+            // nicht schriftbilderDazu: hier gibt es noch nichts zu schuetzen, alle Bilder kamen ueber die Fingerabdruecke
+            e.setValue(no.mitSchriftbildern(schriftbilderText(l)));
+            n++;
+        }
+        return n;
+    }
+
     /**
      * Traegt den Ausgang eines Kampfes ein.
      *
@@ -700,7 +939,8 @@ public final class Gegnerbuch {
                 alt == null ? "" : alt.schirm(),
                 alt == null ? "" : alt.pals(),
                 alt == null ? "" : alt.fingerabdruecke(),
-                alt == null ? "" : alt.schrift());
+                alt == null ? "" : alt.schrift(),
+                alt == null ? "" : alt.schriftbilder());
     }
 
     /**
@@ -731,7 +971,8 @@ public final class Gegnerbuch {
         if (name == null || name.isBlank()) {
             // Zierschrift-Namen liest Windows oft gar nicht: dann der Name der Notiz mit demselben Namensbild, sonst der
             // aus der eigenen Schrift (alle Zeichen bekannt).
-            Notiz bekannt = nachNamensbild(fp, clan, staerke);
+            Notiz bekannt = nachSchriftbild(bilderVon(namensbild), clan, staerke);
+            if (bekannt == null) bekannt = nachNamensbild(fp, clan, staerke);
             name = bekannt != null ? bekannt.name() : schriftName(namensbild);
             if (bekannt != null && (clan == null || clan.isBlank() || keinClan(clan))) clan = bekannt.clan();
         }
@@ -745,7 +986,7 @@ public final class Gegnerbuch {
             // Zierschrift-Namen vor, die keine Texterkennung liest.
             return;
         }
-        String[] kn = kanonischUndSchoener(name, clan, staerke, fp);   // Lese-Varianten auf einen Eintrag
+        String[] kn = kanonischUndSchoener(name, clan, staerke, fp, bilderVon(namensbild));   // Lese-Varianten auf einen Eintrag
         name = kn[0];
         clan = kn[1];
         String key = schluessel(name, clan);
@@ -794,7 +1035,8 @@ public final class Gegnerbuch {
     public synchronized void merkeStaerke(String name, String clan, long staerke, Glyphenschrift.Ergebnis namensbild) {
         String fp = namensbild == null ? null : namensbild.fingerabdruck();
         if ((name == null || name.isBlank()) && staerke > 0) {
-            Notiz bekannt = nachNamensbild(fp, clan, staerke);
+            Notiz bekannt = nachSchriftbild(bilderVon(namensbild), clan, staerke);
+            if (bekannt == null) bekannt = nachNamensbild(fp, clan, staerke);
             name = bekannt != null ? bekannt.name() : schriftName(namensbild);
             if (bekannt != null && (clan == null || clan.isBlank() || keinClan(clan))) clan = bekannt.clan();
         }
@@ -804,7 +1046,7 @@ public final class Gegnerbuch {
             if (!NamensVergleich.siehtMenschlichAus(name)) return;
             clan = OHNE_CLAN;
         }
-        String[] kn = kanonischUndSchoener(name, clan, staerke, fp);   // Lese-Varianten auf einen Eintrag
+        String[] kn = kanonischUndSchoener(name, clan, staerke, fp, bilderVon(namensbild));   // Lese-Varianten auf einen Eintrag
         name = kn[0];
         clan = kn[1];
         String key = schluessel(name, clan);
@@ -909,7 +1151,7 @@ public final class Gegnerbuch {
                 n.setPunkte(), n.sets(), n.geprueft(), n.dauern(), n.einheiten(), n.bauarbeiter(),
                 n.punkte(), n.notiz(), n.steine(),
                 schirmAnzahl >= 0 ? schirmAnzahl + "/" + guteSchirme + "/" + guteStigmas : n.schirm(),
-                gutePals >= 0 ? String.valueOf(gutePals) : n.pals(), n.fingerabdruecke(), n.schrift()));
+                gutePals >= 0 ? String.valueOf(gutePals) : n.pals(), n.fingerabdruecke(), n.schrift(), n.schriftbilder()));
         speichern();
     }
 
@@ -941,7 +1183,8 @@ public final class Gegnerbuch {
                 schirmAnzahl >= 0 ? schirmAnzahl + "/" + guteSchirme + "/" + guteStigmas
                                   : (alt == null ? "" : alt.schirm()),
                 gutePals >= 0 ? String.valueOf(gutePals) : (alt == null ? "" : alt.pals()),
-                alt == null ? "" : alt.fingerabdruecke(), alt == null ? "" : alt.schrift()));
+                alt == null ? "" : alt.fingerabdruecke(), alt == null ? "" : alt.schrift(),
+                alt == null ? "" : alt.schriftbilder()));
         zusammenlegenMit(key);   // Autor 24.10.: Clan falsch gelesen, aber dieselben Sets -> gleich zum alten Eintrag
         speichern();
     }
@@ -1072,6 +1315,7 @@ public final class Gegnerbuch {
     /** Derselbe Spieler unter zwei Eintraegen? */
     private boolean gehoerenZusammen(Notiz a, Notiz b) {
         // Autor 24.10.: gleiches Namensbild (Glyphenschrift) = derselbe Spieler, wie Windows ihn auch las.
+        if (schriftbildGleich(a, b)) return true;   // Autor 21.11.: gleiches Schriftbild + Gegenprobe Kraft/Clan
         if (namensbildGleich(a, b)) return true;
         // Messung 30.10.: Kraft 34.874.371 stand unter 7 Schreibweisen im Buch. Dieselbe Kraft auf alle Stellen, und die Sets
         // widersprechen nicht: derselbe Spieler, auch wenn der Name ganz anders gelesen wurde. Nur mit arena-regeln-neu.txt "an".
@@ -1145,6 +1389,14 @@ public final class Gegnerbuch {
         String kHaupt = aBleibt ? kA : kB, kDazu = aBleibt ? kB : kA;
         // Pruefer 29.10.: "Merged: паша () into G4nawa ()" -- der Name, der bleibt, ist der ohne Stufen-Abzeichen davor.
         String name = haupt.name(), clan = haupt.clan();
+        // Autor 21.11.: "V Myth Gods" (Clan als Name) und "-ЦИРИ-": der echte Name bleibt, sonst zaehlt die Bilanz nicht.
+        if (haupt.nameIstClan() && !dazu.nameIstClan() && plausiblerName(dazu.name())) {
+            String c = dazu.clan().isBlank() ? clan : dazu.clan(), k = schluessel(dazu.name(), c);
+            if (k.equals(kHaupt) || k.equals(kDazu) || !notizen.containsKey(k)) {
+                name = dazu.name();
+                clan = c;
+            }
+        }
         if (abzeichenVor(haupt.name(), dazu.name())) {
             String c = clan.isBlank() ? dazu.clan() : clan, k = schluessel(dazu.name(), c);
             if (k.equals(kHaupt) || k.equals(kDazu) || !notizen.containsKey(k)) {   // nicht auf einen dritten Eintrag
@@ -1169,7 +1421,8 @@ public final class Gegnerbuch {
                 haupt.schirm().isBlank() ? dazu.schirm() : haupt.schirm(),
                 haupt.pals().isBlank() ? dazu.pals() : haupt.pals(),
                 vereint(haupt.fingerabdruecke(), dazu.fingerabdruecke()),
-                haupt.schrift().isBlank() ? dazu.schrift() : haupt.schrift());
+                haupt.schrift().isBlank() ? dazu.schrift() : haupt.schrift(),
+                schriftbilderVereint(haupt.schriftbilder(), dazu.schriftbilder()));
         notizen.remove(kDazu);
         String kNeu = schluessel(name, clan);
         if (!kNeu.equals(kHaupt)) {
@@ -1350,20 +1603,28 @@ public final class Gegnerbuch {
                         t.length > 16 ? t[16] : "",
                         // Spalten 18-19 seit 24.10. (Namensbild: Fingerabdruecke und eigene Schrift)
                         t.length > 17 ? t[17].strip() : "",
-                        t.length > 18 ? t[18] : "");
+                        t.length > 18 ? t[18] : "",
+                        // Spalte 20 seit 21.11. (Schriftbilder: der Name als kleines Bild je Bildschirm-Art)
+                        t.length > 19 ? t[19].strip() : "");
                 if (keinClan(n.name()) || keinClan(n.clan())) continue;   // "Not in clan": raus (30.09.)
                 // Namensbild mit lesbarem Namen (arena-namensbilder.txt, Autor 11.10.): unter dem Namen fuehren.
                 String lesbar = n.name().startsWith("Bild-") ? Namensbilder.name(n.name()) : n.name();
                 if (!lesbar.equals(n.name()) && !notizen.containsKey(schluessel(lesbar, n.clan()))) {
                     n = new Notiz(lesbar, n.clan(), n.verlauf(), n.staerke(), n.artefakte(), n.zuletzt(), n.setPunkte(),
                             n.sets(), n.geprueft(), n.dauern(), n.einheiten(), n.bauarbeiter(), n.punkte(), n.notiz(),
-                            n.steine(), n.schirm(), n.pals(), n.fingerabdruecke(), n.schrift());
+                            n.steine(), n.schirm(), n.pals(), n.fingerabdruecke(), n.schrift(), n.schriftbilder());
                 }
                 notizen.put(schluessel(n.name(), n.clan()), n);
             }
             Log.info("Notizblock", Sprache.t(notizen.size() + " opponents read from the notebook.",
                     notizen.size() + " Gegner aus dem Notizblock gelesen."));
             if (quelle == notizblock && !notizen.isEmpty()) speichern();   // umziehen
+            int mitBild = schriftbilderAusFingerabdruecken();
+            if (mitBild > 0) {
+                Log.info("Notizblock", Sprache.t(mitBild + " opponents got their name picture (Schriftbild) from the glyph library.",
+                        mitBild + " Gegner bekamen ihr Schriftbild aus den Namensbildern der Glyphen-Bibliothek."));
+                speichern();
+            }
             doppelteZusammenlegen();
         } catch (Exception e) {
             Log.warn("Notizblock", Sprache.t("The notebook could not be read: " + e.getMessage() + " -- a new one is created.",
@@ -1394,7 +1655,7 @@ public final class Gegnerbuch {
           .append(" Kaempfen glaubt der Bot der Bilanz, vorher gilt der Gegner als unbekannt.\n");
         sb.append("#\n# Name\tClan\tVerlauf\tStaerke\tArtefakte\tzuletzt"
                 + "\tSetPunkte\tSets\tgeprueft\tDauern(s)\tEinheiten\tBauarbeiter\tTurnierpunkte\tNotiz\tSteine(gelb/rot)"
-                + "\tSchirm(anzahl/gute/stigmas)\tGutePals\tFingerabdruecke\tNamensschrift\n");
+                + "\tSchirm(anzahl/gute/stigmas)\tGutePals\tFingerabdruecke\tNamensschrift\tSchriftbilder\n");
         for (Notiz n : alle()) {
             sb.append(n.name()).append('\t').append(n.clan()).append('\t')
               .append(n.verlauf()).append('\t').append(n.staerke()).append('\t')
@@ -1404,7 +1665,8 @@ public final class Gegnerbuch {
               .append(n.einheiten()).append('\t').append(n.bauarbeiter()).append('\t')
               .append(n.punkte()).append('\t').append(n.notiz()).append('\t').append(n.steine())
               .append('\t').append(n.schirm()).append('\t').append(n.pals())
-              .append('\t').append(n.fingerabdruecke()).append('\t').append(sauber(n.schrift())).append('\n');
+              .append('\t').append(n.fingerabdruecke()).append('\t').append(sauber(n.schrift()))
+              .append('\t').append(n.schriftbilder()).append('\n');
         }
         try {
             sicherSchreiben(datei, sb.toString());
@@ -1621,7 +1883,7 @@ public final class Gegnerbuch {
             notizen.put(schluessel(n.name(), n.clan()), new Notiz(n.name(), n.clan(), n.verlauf(),
                     n.staerke(), n.artefakte(), n.zuletzt(), n.setPunkte(), n.sets(), n.geprueft(),
                     n.dauern(), n.einheiten(), n.bauarbeiter(), n.punkte(), notiz, n.steine(), n.schirm(), n.pals(),
-                    n.fingerabdruecke(), n.schrift()));
+                    n.fingerabdruecke(), n.schrift(), n.schriftbilder()));
         }
         speichern();
         return treffer.size();
@@ -1652,7 +1914,23 @@ public final class Gegnerbuch {
      * immer; sonst die Notiz mit demselben Namensbild (siehe nachNamensbild), erst dann die aehnlichen Namen.
      */
     private String[] kanonisch(String name, String clan, long staerke, String fingerabdruck) {
+        return kanonisch(name, clan, staerke, fingerabdruck, List.of());
+    }
+
+    /**
+     * Autor 21.11.: zuerst das Schriftbild (der Name als Bild, mit Gegenprobe Kraft/Clan) -- vor dem gelesenen Text. So
+     * landen "-UMPM-", "-ЦИРИ-" und "V Myth Gods" bei derselben Notiz, egal was die Texterkennung liest.
+     */
+    private String[] kanonisch(String name, String clan, long staerke, String fingerabdruck, List<Schriftbild> bilder) {
         String c = clan == null ? "" : clan;
+        Notiz perSchriftbild = nachSchriftbild(bilder, c, staerke);
+        if (perSchriftbild != null) {
+            if (name != null && !name.isBlank() && !schluessel(name, c).equals(schluessel(perSchriftbild.name(), perSchriftbild.clan()))) {
+                Log.debug("Notizblock", "\"" + sauber(name) + "\" (" + sauber(c) + ") ist " + perSchriftbild.name() + " ("
+                        + perSchriftbild.clan() + ") -- gleiches Schriftbild.");
+            }
+            return new String[]{perSchriftbild.name(), perSchriftbild.clan()};
+        }
         if (name != null && !name.isBlank() && notizen.containsKey(schluessel(name, c))) {
             return new String[]{name, c};
         }
@@ -1724,17 +2002,24 @@ public final class Gegnerbuch {
      * keine Sonderzeichen, nicht abgeschnitten ("Winterf." gegen "Winterfell") --, zieht der
      * Eintrag mit allem, was er weiss, auf die neue Schreibweise um.
      */
-    private String[] kanonischUndSchoener(String name, String clan, long staerke, String fingerabdruck) {
-        String[] kn = kanonisch(name, clan, staerke, fingerabdruck);
+    private String[] kanonischUndSchoener(String name, String clan, long staerke, String fingerabdruck, List<Schriftbild> bilder) {
+        String[] kn = kanonisch(name, clan, staerke, fingerabdruck, bilder);
         String altName = kn[0], altClan = kn[1] == null ? "" : kn[1];
-        String neuName = schoener(altName, sauber(name)) ? sauber(name) : altName;
+        // Autor 21.11.: hiess der Eintrag wie sein Clan ("V Myth Gods"), gilt jetzt der gelesene Name, wenn er glaubhaft und
+        // selbst kein Clan ist -- der Eintrag zaehlt dann wieder fuer Bilanz und Kraft.
+        boolean altIstClan = altName != null && nameIstClan(altName, altClan) && name != null
+                && plausiblerName(sauber(name)) && !nameIstClan(sauber(name), clan == null ? altClan : clan);
+        String neuName = altIstClan || schoener(altName, sauber(name)) ? sauber(name) : altName;
+        // ... und umgekehrt wird nie ein Clan-Stueck zum Namen ("V Myth Gods" gelesen, per Schriftbild "-ЦИРИ-" gefunden)
+        if (!neuName.equals(altName) && nameIstClan(neuName, clan == null || clan.isBlank() ? altClan : clan)) neuName = altName;
         String neuClan = clan != null && !clan.isBlank() && schoener(altClan, sauber(clan)) ? sauber(clan) : altClan;
         if (neuName.equals(altName) && neuClan.equals(altClan)) return kn;
         Notiz n = notizen.remove(schluessel(altName, altClan));
         if (n == null) return kn;   // noch kein Eintrag -- dann gibt es nichts umzuziehen
         notizen.put(schluessel(neuName, neuClan), new Notiz(neuName, neuClan, n.verlauf(), n.staerke(),
                 n.artefakte(), n.zuletzt(), n.setPunkte(), n.sets(), n.geprueft(), n.dauern(), n.einheiten(),
-                n.bauarbeiter(), n.punkte(), n.notiz(), n.steine(), n.schirm(), n.pals(), n.fingerabdruecke(), n.schrift()));
+                n.bauarbeiter(), n.punkte(), n.notiz(), n.steine(), n.schirm(), n.pals(), n.fingerabdruecke(), n.schrift(),
+                n.schriftbilder()));
         Log.info("Notizblock", "Schreibweise verbessert: \"" + altName + "\" (" + altClan + ") -> \""
                 + neuName + "\" (" + neuClan + ").");
         return new String[]{neuName, neuClan};

@@ -59,7 +59,8 @@ public final class Kriegsplan {
      * los. Darum rechnet der Kriegsplan immer mit Berlin, egal welche Zeitzone eingestellt ist.
      */
     static LocalDateTime spielzeit() {
-        return LocalDateTime.now(INTERN);
+        // Konrad 19.11.: Weltzeit aus der Weltuhr -- seine Windows-Uhr ging neun Stunden vor, der Bot ging zur falschen Zeit los.
+        return LocalDateTime.ofInstant(Weltuhr.jetzt(), INTERN);
     }
 
     /**
@@ -273,7 +274,7 @@ public final class Kriegsplan {
         LocalDateTime fenster = offenesFenster(jetzt);
         if (fenster == null) return Optional.empty();
         if (fenster.equals(angestossen)) return Optional.empty();
-        if (erledigt(fenster)) return Optional.empty();
+        if (erledigt(fenster, jetzt)) return Optional.empty();
         return Optional.of(fenster);
     }
 
@@ -299,9 +300,10 @@ public final class Kriegsplan {
      */
     public synchronized Optional<LocalDateTime> nochAufzustellen() {
         if (!selbsttaetig) return Optional.empty();
-        LocalDateTime fenster = offenesFenster(spielzeit());
+        LocalDateTime jetzt = spielzeit();
+        LocalDateTime fenster = offenesFenster(jetzt);
         if (fenster == null) return Optional.empty();
-        if (erledigt(fenster)) return Optional.empty();
+        if (erledigt(fenster, jetzt)) return Optional.empty();
         return Optional.of(fenster);
     }
 
@@ -429,9 +431,10 @@ public final class Kriegsplan {
      * @return true, wenn noch einmal losgelaufen werden darf
      */
     public synchronized boolean nochmalErlauben() {
-        LocalDateTime fenster = offenesFenster(spielzeit());
+        LocalDateTime jetzt = spielzeit();
+        LocalDateTime fenster = offenesFenster(jetzt);
         if (fenster == null || !fenster.equals(angestossen)) return false;
-        if (erledigt(fenster)) return false;
+        if (erledigt(fenster, jetzt)) return false;
         if (!fenster.equals(wiederholtFuer)) {
             wiederholtFuer = fenster;
             wiederholt = 0;
@@ -450,9 +453,19 @@ public final class Kriegsplan {
      * das nicht vor -- aber es kostet nichts, und Zeiten aendern sich.
      */
     /** Fenster erledigt: der Vermerk ist gleich oder spaeter (eine Kontrolle um 4:50 deckt die Aufstellung von 3:20 mit ab). */
-    private static boolean erledigt(LocalDateTime fenster) {
-        LocalDateTime v = gelesenerVermerk();
-        return v != null && !v.isBefore(fenster);
+    private static boolean erledigt(LocalDateTime fenster, LocalDateTime jetzt) {
+        return erledigtBei(gelesenerVermerk(), fenster, jetzt);
+    }
+
+    /**
+     * Die reine Regel. Konrad 19.11.: Ein Vermerk aus der ZUKUNFT gilt nicht. Er entsteht, wenn die Uhr vorging (bei Konrad
+     * neun Stunden) und dann richtiggestellt wird -- er deckte sonst alle Kriege bis dahin ab, und der Bot verschliefe sie.
+     * Geschrieben wird immer der Anfang des offenen Fensters, also nie etwas nach "jetzt".
+     */
+    static boolean erledigtBei(LocalDateTime vermerk, LocalDateTime fenster, LocalDateTime jetzt) {
+        if (vermerk == null) return false;
+        if (jetzt != null && vermerk.isAfter(jetzt)) return false;
+        return !vermerk.isBefore(fenster);
     }
 
     static LocalDateTime offenesFenster(LocalDateTime jetzt) {
@@ -485,7 +498,7 @@ public final class Kriegsplan {
     public static LocalDateTime naechsteKriegszeitHier(LocalDateTime jetztHier) {
         java.time.ZoneId zone = Zeitzone.zone();
         // In der Nacht der Zeitumstellung gibt es eine Ortszeit zweimal -- dann gilt der Versatz, den die Zone JETZT hat.
-        java.time.ZonedDateTime hier = java.time.ZonedDateTime.ofLocal(jetztHier, zone, zone.getRules().getOffset(java.time.Instant.now()));
+        java.time.ZonedDateTime hier = java.time.ZonedDateTime.ofLocal(jetztHier, zone, zone.getRules().getOffset(Weltuhr.jetzt()));
         java.time.ZonedDateTime k = naechsteKriegszeitIn(hier.toInstant(), zone);
         return k == null ? null : k.toLocalDateTime();
     }

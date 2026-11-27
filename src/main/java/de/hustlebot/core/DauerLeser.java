@@ -101,6 +101,8 @@ final class DauerLeser {
      *         Weg gehen
      */
     static synchronized List<String> lies(Path bild, String sprache) {
+        zuletzt = System.currentTimeMillis();
+        Leerlauf.beobachten();
         if (fehlschlaege >= GENUG_FEHLSCHLAEGE) return null;
         if (!Files.exists(SKRIPT)) return null;
 
@@ -159,6 +161,20 @@ final class DauerLeser {
             fehlschlaege++;
             return null;
         }
+    }
+
+    /** Wann zuletzt gelesen wurde (fuer den Leerlauf-Aufraeumer). */
+    private static volatile long zuletzt = System.currentTimeMillis();
+
+    /**
+     * Sparsam (Autor 20.11.): das offene PowerShell nach {@code nachMs} ohne Auftrag beenden -- es haelt die
+     * Windows-Texterkennung im Speicher. Der naechste Auftrag startet es neu (Start ~0,2 s, siehe Texterkennung).
+     */
+    static synchronized boolean beendenWennUnbenutzt(long jetzt, long nachMs) {
+        if (!laeuft() || jetzt - zuletzt < nachMs) return false;
+        Log.debug("Text", "Offene Texterkennung " + (jetzt - zuletzt) / 60_000 + " min nicht gebraucht -- beendet (Speicher frei).");
+        beenden();
+        return true;
     }
 
     private static boolean laeuft() {

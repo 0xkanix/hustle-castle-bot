@@ -64,7 +64,7 @@ class ClanWarStuetzpunktTest {
         assertFalse(ClanWarMode.stufePasst("2 T11's FILL", -1));   // Stufe unbekannt: kein Vorrang, aber auch nicht gesperrt
         assertFalse(ClanWarMode.stufePasst("MEINCLAN ; Titans", 11));
         // echte Spielernamen bleiben Namen
-        for (String n : new String[]{"Anna", "Carl/Karl", "Karla/Joe/ Hagen", "sam/paula", "Bruno ; Autor ; ; Emil",
+        for (String n : new String[]{"Anna", "Carl/Karl", "Karla/Jonas/ Hagen", "sam/paula", "Bruno ; Autor ; ; Emil",
                 "Otto ; Karl ; ; David", "Til", "Tim ; Til", "Tom", "Anna ; Paula ; ; Tom", ""}) {
             assertNull(ClanWarMode.stufenNotiz(n), n);
         }

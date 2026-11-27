@@ -713,6 +713,8 @@ public final class Steuerprogramm {
             StringBuilder info = new StringBuilder();
             info.append("Report #").append(id).append('\n');
             info.append("Time: ").append(de.hustlebot.core.Zeitzone.beschreibung()).append('\n');
+            // Konrad 19.11.: Windows-Zeitzone und Windows-Anzeige mitschicken -- daran sieht man eine falsch gestellte Uhr sofort.
+            info.append("PC clock: ").append(de.hustlebot.core.Weltuhr.beschreibung()).append('\n');
             info.append("What happened: ").append(beschreibung.isEmpty() ? "-" : beschreibung).append('\n');
             info.append("Version: ").append(de.hustlebot.core.UpdateNachschub.fassungInDerJar()).append('\n');
             info.append("State: ").append(zustand()).append('\n');

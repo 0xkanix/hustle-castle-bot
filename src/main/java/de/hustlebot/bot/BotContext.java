@@ -101,6 +101,22 @@ public final class BotContext {
      * Nimmt ein frisches Bild des Spielfensters auf. Gibt null zurueck, wenn das
      * Fenster verschwunden ist.
      */
+    /**
+     * 15.11. / X3A2: Hat sich das Bild beim letzten sleepUntilChanged() wirklich geaendert? Der Notausgang (rotes X) darf
+     * "Unbekanntes Fenster geschlossen" nur dann als Fortschritt melden, wenn der Klick etwas bewirkt hat -- sonst
+     * liefe die Haenger-Uhr nie ab (Captcha: zwoelf wirkungslose Klicks aufs hintere X).
+     */
+    private volatile boolean letzteWartungGeaendert = true;
+
+    public boolean letzteWartungGeaendert() {
+        return letzteWartungGeaendert;
+    }
+
+    /** Fortschritt melden nur, wenn der letzte Klick das Bild veraendert hat; sonst nur Debug-Zeile. */
+    public static boolean notausgangZaehlt(boolean bildGeaendert) {
+        return bildGeaendert;
+    }
+
     /** Das zuletzt aufgenommene Bild (nach refresh() ist ein frueher geholtes ungueltig). */
     public Mat aktuellesBild() {
         return lastMat;
@@ -175,7 +191,40 @@ public final class BotContext {
     }
 
     public boolean visible(Mat screen, String template) {
-        return find(screen, template).isPresent();
+        boolean da = find(screen, template).isPresent();
+        // 20.11.: der runde "Map"-Knopf sitzt auch auf der Gebietskarte (Schwert-Stuetzpunkte) -- "in der
+        // Burg"-Pruefungen ueber map_button/map_button_alt hielten sie fuer die Burg. Dort gilt er nicht als Burg-Merkmal.
+        // (Klicken ueber find()/clickIfVisible bleibt unberuehrt: von dort fuehrt der Knopf weiter.)
+        if (da && (T_GEBIET_KARTE_KNOPF.equals(template) || T_GEBIET_KARTE_KNOPF_ALT.equals(template))
+                && screen != null && gebietskarte(screen)) {
+            return false;
+        }
+        return da;
+    }
+
+    static final String T_GEBIET_KARTE_KNOPF = "map_button", T_GEBIET_KARTE_KNOPF_ALT = "map_button_alt";
+    /** Schwert-Stuetzpunkte der Gebietskarte (gelernt 20.11., Ordner templates/gelernt/dungeon/karte). */
+    static final String[] GEBIET_SCHWERTER = {"rs_gebietskarte_schwert", "rs_gebietskarte_schwertb"};
+    private Mat gebietGepruefterBild;
+    private boolean gebietErgebnis;
+    private long gebietUm;
+
+    /** Steht das Spiel auf der Gebietskarte (die Schwert-Stuetzpunkte sind zu sehen)? Ergebnis wird je Bild (hoechstens 0,3 s) gemerkt. */
+    public boolean gebietskarte(Mat screen) {
+        if (screen == null || screen.empty()) return false;
+        synchronized (this) {
+            if (screen == gebietGepruefterBild && System.currentTimeMillis() - gebietUm < 300) return gebietErgebnis;
+        }
+        boolean ja = false;
+        for (String n : GEBIET_SCHWERTER) {
+            if (matcher.has(n) && find(screen, n).isPresent()) { ja = true; break; }
+        }
+        synchronized (this) {
+            gebietGepruefterBild = screen;
+            gebietErgebnis = ja;
+            gebietUm = System.currentTimeMillis();
+        }
+        return ja;
     }
 
     /**
@@ -609,6 +658,7 @@ public final class BotContext {
         long begonnen = System.currentTimeMillis();
         long vorher = gewartetMs.get();
         boolean geaendert = sleepUntilChangedIntern(minMs, maxMs);
+        letzteWartungGeaendert = geaendert;
         long gebraucht = System.currentTimeMillis() - begonnen;
         // Die Blindzeit darin lief ueber sleep() und ist schon gezaehlt.
         gewartetMs.addAndGet(Math.max(0, gebraucht - (gewartetMs.get() - vorher)));

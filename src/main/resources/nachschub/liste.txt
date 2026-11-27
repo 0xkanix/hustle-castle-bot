@@ -172,7 +172,6 @@ clanwar/cw_outpost_green.png
 clanwar/cw_outpost_orange.png
 clanwar/cw_prep_stage.png
 clanwar/cw_previous_squad.png
-clanwar/cw_skip_1.png
 clanwar/cw_skip_2.png
 clanwar/cw_slash.png
 clanwar/cw_squads_label.png
@@ -415,6 +414,8 @@ event-belohnungen/ev_stab_kern.png
 gelernt/arena/allianz/ar_allianz_aus.png
 gelernt/arena/allianz/ar_allianz_blitz.png
 gelernt/arena/allianz/ar_allianz_faust.png
+gelernt/arena/allianz/ar_allianz_faust_lila.png
+gelernt/arena/allianz/ar_allianz_faust_orange.png
 gelernt/arena/allianz/ar_allianz_pfeile.png
 gelernt/arena/allianz/ar_allianz_sonne.png
 gelernt/arena/anzeigen/ar_node_2.png
@@ -456,6 +457,7 @@ gelernt/arena/held/ar_held_neben_gut_2.png
 gelernt/arena/pals/ar_pal_gut_1.png
 gelernt/arena/pals/ar_pal_gut_2.png
 gelernt/arena/pals/ar_pal_gut_3.png
+gelernt/arena/pals/ar_pal_gut_3_pose2.png
 gelernt/arena/pals/ar_pal_knopf.png
 gelernt/arena/pals/ar_pal_meh_1.png
 gelernt/arena/pals/ar_pal_titel.png
@@ -496,6 +498,16 @@ gelernt/clanwar/cw_move_squad.png
 gelernt/clanwar/nahrung/cw_nahrung_weiter10.png
 gelernt/dungeon/dc_previous_squad_2.png
 gelernt/dungeon/invited_haken.png
+gelernt/dungeon/clan/rs_chat_schreiben.png
+gelernt/dungeon/clan/rs_chat_senden.png
+gelernt/dungeon/clan/rs_reisechat_reiter.png
+gelernt/dungeon/clan/rs_reisechat_weg.png
+gelernt/dungeon/clan/rs_verlies_clan.png
+gelernt/dungeon/klassen/kb_klasse_bogen.png
+gelernt/dungeon/klassen/kb_klasse_magier.png
+gelernt/dungeon/klassen/kb_klasse_tank.png
+gelernt/dungeon/karte/rs_gebietskarte_schwert.png
+gelernt/dungeon/karte/rs_gebietskarte_schwertb.png
 gelernt/dungeon/waypoint_boss_vampir.png
 gelernt/event/ev_belohnung_erhalten.png
 gelernt/event/ev_fass_zu_6.png
@@ -556,6 +568,9 @@ gelernt/stigma/st_bull_kopf.png
 gelernt/stigma/st_lg_gesicht.png
 gelernt/stigma/st_lv1.png
 gelernt/stoer/dialog_weiter.png
+gelernt/stoer/einf_namensband.png
+gelernt/stoer/st_glueckwunsch.png
+gelernt/stoer/st_zur_mailbox.png
 gelernt/team/held_haupt_gut_1.png
 gelernt/team/held_neben_gut_1.png
 gelernt/team/held_neben_gut_2.png
@@ -735,6 +750,9 @@ lighthouse/lh_refresh.png
 lighthouse/lh_titel.png
 lighthouse/lh_titel_abend.png
 lighthouse/lh_to_battle.png
+spielquests/sq_buch.png
+spielquests/sq_reiter_daily.png
+spielquests/sq_watch.png
 titantower/tt_aktivitaet.png
 titantower/tt_aktivitaet_titel.png
 titantower/tt_auto.png

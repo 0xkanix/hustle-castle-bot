@@ -424,23 +424,14 @@ public final class Nahrungskisten {
                 Log.info("Nahrung", Sprache.t("Food " + nahrungVorher + ", needed " + kosten + " -- short by " + bedarf + ". Searching the bag for food chests.",
                         "Nahrung " + nahrungVorher + ", gebraucht werden " + kosten
                         + " -- es fehlen " + bedarf + ". Die Tasche wird nach Nahrungskisten durchsucht."));
-                // Steht an der Tasche eine 0, ist sie leer (Autor, 27.09.) -- gleich in den Clan-Laden.
+                // Autor 27.09.: "Steht an der Tasche eine 0, ist sie leer" -- 15.11. 03:50 live: an der Tasche stand "14070",
+                // der Bot las davon nur die "0" (der Ausschnitt schneidet die breite Zahl ab) und hielt die volle Tasche
+                // (270 Nahrungskisten) fuer leer -> Portal-Aufstieg pausierte. Die Zahl an der Tasche entscheidet deshalb
+                // nichts mehr: der Bot schaut immer hinein. Ist sie wirklich leer, geht es von dort weiter (erkunden/ZUMACHEN).
                 OptionalLong inTasche = Burgstand.taschenZahl(screen, ctx);
                 if (inTasche.isPresent() && inTasche.getAsLong() == 0) {
-                    Log.info("Nahrung", Sprache.t("The bag shows 0 -- it is empty, no need to look inside.",
-                            "An der Tasche steht 0 -- sie ist leer, der Blick hinein faellt weg."));
-                    if (mitLaden && ClanLaden.einsatzbereit(ctx)) {
-                        ladenVersucht = true;
-                        laden.starten();
-                        phase = Phase.LADEN;
-                        return true;
-                    }
-                    // Kein Clan-Laden: weiter zum Nachlesen -- dort kommen (im Krieg) die Videos.
-                    Log.info("Nahrung", Sprache.t(mitLaden ? "Bag empty and no clan store (templates missing)." : "Bag empty.",
-                            mitLaden ? "Tasche leer und kein Clan-Laden (Vorlagen fehlen)." : "Tasche leer."));
-                    phase = Phase.NACHLESEN;
-                    leseVersuche = 0;
-                    return true;
+                    Log.info("Nahrung", Sprache.t("The bag seems to show 0 -- looking inside anyway (the number there is often cut off).",
+                            "An der Tasche scheint 0 zu stehen -- trotzdem hineinschauen (die Zahl dort wird oft abgeschnitten)."));
                 }
                 // Autor 17.10.: "Der Bot soll erst in meine Tasche schauen, ob Nahrungskisten da sind, falls keine da
                 // sind, soll er erst in den Clan-Laden gehen und welche kaufen!" -- vorher (30.09.) kam der Clan-Laden

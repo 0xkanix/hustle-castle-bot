@@ -230,4 +230,17 @@ public final class RunTracker {
     public void resetIdleClock() {
         lastProgressAt = System.currentTimeMillis();
     }
+
+    /**
+     * Zeit, die der Motor selbst verbraucht hat (nicht der Modus), zaehlt nicht als Stillstand: die Untaetigkeitsuhr
+     * rueckt um so viel vor -- hoechstens bis jetzt.
+     *
+     * Konrad 20.11. (Berichte LT6E, Y9JU, VLD8, BUX9): beim Start von Leuchtturm/Kolosseum las der Motor erst den
+     * Turnier-Balken (Texterkennung, beim ersten Mal mit Laden der Erkennung 9-11 s). Die Haenger-Uhr (20 s) lief dabei
+     * schon -- "seit 20 s kein Fortschritt, zuletzt: Start", obwohl der Modus gerade erst losgelegt hatte.
+     */
+    public void gutschreiben(long ms) {
+        if (ms <= 0) return;
+        lastProgressAt = Math.min(System.currentTimeMillis(), lastProgressAt + ms);
+    }
 }

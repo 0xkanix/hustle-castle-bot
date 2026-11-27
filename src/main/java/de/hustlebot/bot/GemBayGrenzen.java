@@ -363,6 +363,33 @@ final class GemBayGrenzen {
         return !rest.matches("(?s).*\\d.*");
     }
 
+    /**
+     * Vorsichtiger Standard fuer Freunde (Autor, 20.11.): nur kostenlose Reisen ("Free"). Autors Schluessel und
+     * wer gembay-mehr.txt = "an" setzt, spielt wie bisher (bis der Preis in Diamanten steht). true = weiterspielen.
+     */
+    static boolean reiseErlaubt(boolean autor, boolean mehr, PreisArt art) {
+        if (art == PreisArt.ANDERER_PREIS) return false;           // Diamanten: nie
+        if (autor || mehr) return true;
+        return art == PreisArt.FREI;                                // Freunde: nur "Free"; Nahrung/unklar = fertig
+    }
+
+    /** Nahrungskisten (Tasche/Clan-Laden) fuer die Gem Bay: nur Autor oder mit gembay-mehr.txt = "an". */
+    static boolean kistenErlaubt(boolean autor, boolean mehr) {
+        return autor || mehr;
+    }
+
+    /** Ist gembay-mehr.txt auf "an"? */
+    static boolean mehrAn() {
+        try {
+            java.nio.file.Path d = java.nio.file.Path.of("gembay-mehr.txt");
+            if (!java.nio.file.Files.exists(d)) return false;
+            String t = java.nio.file.Files.readString(d).trim().toLowerCase(java.util.Locale.ROOT);
+            return t.equals("an") || t.equals("ja") || t.equals("on") || t.equals("true");
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     /** Was unter "Start journey" steht. */
     enum PreisArt { NAHRUNG, FREI, ANDERER_PREIS, UNKLAR }
 

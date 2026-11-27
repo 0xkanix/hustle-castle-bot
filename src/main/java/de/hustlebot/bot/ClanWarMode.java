@@ -410,7 +410,21 @@ public final class ClanWarMode implements GameMode {
                 de.hustlebot.core.Texterkennung.weisseSchrift(teil(b, 0.25, 0.07, 0.55, 0.08), 3))).strip();
         // Live-Test 17.10.: Mit 0..25 % Breite kam auch der Name ueber der ersten Trupp-Zeile mit ("Autor" im Wrath Outpost,
         // wo sein Titanen-Trupp stand). Jetzt nur die weisse Sprechblase der Clan-Verwaltung (gemessen 15..185 x 60..180).
-        List<String> zeilen = de.hustlebot.core.Texterkennung.lies(teil(b, 0.0, 0.08, 0.185, 0.155));
+        // Autor 21.11. (Server 14:23, Titan nicht gesetzt): die Blase ist so hoch wie der Text -- im Tempel standen 11 Namen
+        // in 6 Zeilen ("Ben ; Bruno : / Carl ; Paula ; / Anna ; Sam ; / Autor ; ..."), gelesen wurden nur die ersten
+        // zwei (bis y 180), "Autor" an 7. Stelle fehlte -> Turm galt als "fuer andere reserviert". Jetzt bis zur Oberkante
+        // der Knoepfe unter der Blase (Bild 21.11.: letzte Zeile ~282, Stift-Knopf ab ~312 im Spielbild).
+        // Autor 21.11. 15:5x: "die komplette Spalte links vom Turm durchlesen, bis Zeile 20" -- die Blase waechst mit dem
+        // Text; ihre Unterkante wird am weissen Hintergrund erkannt (sonst wie zuletzt bis 0,40).
+        // Autor 22.11.: "mein Server-Bot setzt mein normales Team immer in den falschen WP" -- seit 3.157 stand bei JEDEM
+        // Turm names "": die Blasen-Suche hoerte an der Ueberschrift (weisse Schrift auf der Karte, ~35 % weiss) bzw. an der
+        // ersten fetten Namenszeile (11..28 % weiss) auf, gelesen wurde nur "Message from the Clan Administration". Ohne
+        // Zettel las der Rueckfall 0,08..0,40 die Turmnamen der Karte ("of the immort ; Treachery of Kings") -> freie
+        // Tuerme galten als "fuer andere reserviert". Jetzt nur die weisse Blase selbst: von ihrer Oberkante bis zum gelben
+        // Stift-Knopf (bzw. Blasenende); keine Blase = kein Zettel, nichts lesen.
+        double[] zettel = zettelBereich(b);
+        List<String> zeilen = zettel == null ? List.of()
+                : de.hustlebot.core.Texterkennung.lies(teil(b, 0.0, zettel[0], ZETTEL_BREITE, zettel[1] - zettel[0]));
         List<String> namen = new ArrayList<>();
         for (String z : zeilen) {
             String k = z.toLowerCase(java.util.Locale.ROOT);
@@ -528,13 +542,29 @@ public final class ClanWarMode implements GameMode {
         List<Turm> liste = new ArrayList<>();
         for (Turm tt : dieser) if (enthaeltNamen(erkundet.get(tt.schluessel()).namen(), ich)) liste.add(tt);
         if (sorte == Sorte.AUSSENPOSTEN && ruhmRegelAn()) {
-            java.util.Comparator<Turm> nachRuhm = java.util.Comparator.comparingInt(tt -> -erkundet.get(tt.schluessel()).ruhm());
-            dieser.stream().filter(tt -> !liste.contains(tt) && erkundet.get(tt.schluessel()).ruhm() > 0
-                    && !erkundet.get(tt.schluessel()).tempel()).sorted(nachRuhm).forEach(liste::add);
-            dieser.stream().filter(tt -> !liste.contains(tt) && erkundet.get(tt.schluessel()).ruhm() > 0
-                    && erkundet.get(tt.schluessel()).tempel()).sorted(nachRuhm).forEach(liste::add);
+            List<Turm> rest = dieser.stream().filter(tt -> !liste.contains(tt)).toList();
+            liste.addAll(nachRuhm(rest, tt -> erkundet.get(tt.schluessel()), !TitanElixier.umtauschMoeglich()));
         }
         return liste;
+    }
+
+    /**
+     * Autor 21.11.: steht der Spielername an keinem Titanen-Turm, kommt das Titanen-Team in den mit dem meisten Ruhm
+     * ("Glory for winning: 11 500"). Die Tempel ("Temple of the ... Elements") verlangen Feuer-Titanen -- solange der
+     * Elixier-Umtausch nicht moeglich ist (tempelMeiden), kommen sie erst nach allen anderen. Tuerme ohne gelesenen Ruhm
+     * fallen weg. Absteigend nach Ruhm.
+     */
+    static <T> List<T> nachRuhm(List<T> kandidaten, java.util.function.Function<T, TurmInfo> info, boolean tempelMeiden) {
+        java.util.Comparator<T> ruhmAb = java.util.Comparator.comparingInt(t -> -info.apply(t).ruhm());
+        java.util.Comparator<T> folge = tempelMeiden
+                ? java.util.Comparator.<T>comparingInt(t -> info.apply(t).tempel() ? 1 : 0).thenComparing(ruhmAb)
+                : ruhmAb;
+        return kandidaten.stream().filter(t -> info.apply(t) != null && info.apply(t).ruhm() > 0).sorted(folge).toList();
+    }
+
+    /** Der erste nach {@link #nachRuhm}: meister Ruhm, Tempel nur als letzte Wahl, solange tempelMeiden. */
+    static <T> Optional<T> meisterRuhm(List<T> kandidaten, java.util.function.Function<T, TurmInfo> info, boolean tempelMeiden) {
+        return nachRuhm(kandidaten, info, tempelMeiden).stream().findFirst();
     }
 
     /** Die Nachfrage nach "Move squad": nur Yes, wenn sie vom Verschieben spricht und KEINE Zahl (Preis) darin steht. */
@@ -561,17 +591,113 @@ public final class ClanWarMode implements GameMode {
         }));
     }
 
-    /** Steht im offenen Turmfenster "You can only deploy ... titans"? (Kasten "Special requirements", Fotos 26.10.) */
-    private static boolean elementPflichtImBild(BotContext ctx) {
+    /**
+     * Der Text im Kasten "Special requirements" des offenen Turmfensters (Fotos 26.10.), klein geschrieben, sonst "".
+     * Autors Bild 21.11.: der Satz "You can only deploy earth titans" steht ueber "Glory for winning", etwa x 220..940,
+     * y 560..640 im 1159x770-Bild -- das liegt ganz in diesem Ausschnitt (x 174..985, y 508..647).
+     */
+    private static String elementTextImBild(BotContext ctx) {
         java.awt.image.BufferedImage b = ctx.frame();
-        if (b == null) return false;
+        if (b == null) return "";
         int x = (int) (b.getWidth() * 0.15), y = (int) (b.getHeight() * 0.66), w = (int) (b.getWidth() * 0.70), h = (int) (b.getHeight() * 0.18);
         try {
-            String text = String.join(" ", de.hustlebot.core.Texterkennung.lies(b.getSubimage(x, y, w, h))).toLowerCase(java.util.Locale.ROOT);
-            return text.contains("only deploy") || text.contains("can only");
+            return String.join(" ", de.hustlebot.core.Texterkennung.lies(b.getSubimage(x, y, w, h))).toLowerCase(java.util.Locale.ROOT);
         } catch (Exception e) {
-            return false;
+            return "";
         }
+    }
+
+    /** Steht im Text "You can only deploy ... titans"? (wie bisher nur der Satzanfang) */
+    static boolean elementPflicht(String text) {
+        if (text == null) return false;
+        String t = text.toLowerCase(java.util.Locale.ROOT);
+        return t.contains("only deploy") || t.contains("can only");
+    }
+
+    /**
+     * Das verlangte Element aus dem Kasten "Special requirements" -- nur, wenn der Satz selbst zu sehen ist (ein Wort wie
+     * "deploy", "only" oder "titans"), damit ein zufaelliges Wort im Ausschnitt keinen Umtausch ausloest.
+     */
+    static TitanElixier.Element verlangtesElement(String text) {
+        if (text == null) return null;
+        String t = text.toLowerCase(java.util.Locale.ROOT);
+        if (!(t.contains("depl") || t.contains("only") || t.contains("titan"))) return null;
+        return elementAus(t);
+    }
+
+    /** Die Element-Woerter, wie sie im Turmfenster stehen koennen (englisch; deutsch fuer eine deutsche Spielsprache). */
+    private static final Map<String, TitanElixier.Element> ELEMENT_WOERTER = Map.of(
+            "earth", TitanElixier.Element.ERDE, "water", TitanElixier.Element.WASSER, "fire", TitanElixier.Element.FEUER,
+            "light", TitanElixier.Element.LICHT, "dark", TitanElixier.Element.DUNKEL);
+    private static final Map<String, TitanElixier.Element> ELEMENT_DEUTSCH = Map.of(
+            "erd", TitanElixier.Element.ERDE, "wasser", TitanElixier.Element.WASSER, "feuer", TitanElixier.Element.FEUER,
+            "licht", TitanElixier.Element.LICHT, "dunkel", TitanElixier.Element.DUNKEL);
+
+    /**
+     * Autor 21.11.: welches Element verlangt der Titanen-Turm? "You can only deploy earth titans" -> ERDE. Tolerant gegen
+     * Lesefehler (ein Buchstabe falsch/fehlend/zuviel, "1" statt "l", "0" statt "o", Satzzeichen). Stehen zwei
+     * verschiedene Elemente da, zaehlt das Wort direkt nach "deploy" bzw. direkt vor "titans"; sonst null. Kein Element
+     * (oder kein Text) = null.
+     */
+    static TitanElixier.Element elementAus(String text) {
+        if (text == null || text.isBlank()) return null;
+        String t = text.toLowerCase(java.util.Locale.ROOT).replace('1', 'l').replace('|', 'l').replace('0', 'o')
+                .replaceAll("[^a-zäöüß]+", " ").strip();
+        if (t.isEmpty()) return null;
+        String[] w = t.split(" ");
+        java.util.Set<TitanElixier.Element> gefunden = java.util.EnumSet.noneOf(TitanElixier.Element.class);
+        TitanElixier.Element nachDeploy = null, vorTitans = null;
+        for (int i = 0; i < w.length; i++) {
+            TitanElixier.Element e = elementWort(w[i]);
+            if (e == null) continue;
+            gefunden.add(e);
+            if (i > 0 && w[i - 1].startsWith("depl")) nachDeploy = e;
+            if (i + 1 < w.length && (w[i + 1].startsWith("tita") || w[i + 1].startsWith("titn"))) vorTitans = e;
+        }
+        if (gefunden.size() == 1) return gefunden.iterator().next();
+        if (nachDeploy != null) return nachDeploy;
+        return vorTitans;
+    }
+
+    /** Ein einzelnes Wort -> Element (Abstand hoechstens 1 Buchstabe; deutsch auch als Wortanfang: "erdtitanen"). */
+    private static TitanElixier.Element elementWort(String wort) {
+        if (wort.length() < 3) return null;
+        for (Map.Entry<String, TitanElixier.Element> e : ELEMENT_WOERTER.entrySet()) {
+            if (wort.equals(e.getKey())) return e.getValue();
+        }
+        for (Map.Entry<String, TitanElixier.Element> e : ELEMENT_DEUTSCH.entrySet()) {
+            if (wort.startsWith(e.getKey())) return e.getValue();
+        }
+        if (wort.length() < 4) return null;
+        for (Map.Entry<String, TitanElixier.Element> e : ELEMENT_WOERTER.entrySet()) {
+            if (abstandHoechstensEins(wort, e.getKey())) return e.getValue();
+        }
+        return null;
+    }
+
+    /** Levenshtein-Abstand <= 1 (ein Buchstabe ersetzt, eingefuegt oder weggelassen). */
+    static boolean abstandHoechstensEins(String a, String b) {
+        if (a.equals(b)) return true;
+        int la = a.length(), lb = b.length();
+        if (Math.abs(la - lb) > 1) return false;
+        int i = 0, j = 0;
+        boolean fehler = false;
+        while (i < la && j < lb) {
+            if (a.charAt(i) == b.charAt(j)) {
+                i++;
+                j++;
+                continue;
+            }
+            if (fehler) return false;
+            fehler = true;
+            if (la > lb) i++;
+            else if (lb > la) j++;
+            else {
+                i++;
+                j++;
+            }
+        }
+        return !(fehler && (i < la || j < lb));
     }
 
     private Outcome turmOeffnen(BotContext ctx, Turm t) {
@@ -753,6 +879,56 @@ public final class ClanWarMode implements GameMode {
         return b.getSubimage(px, py, Math.max(1, pw), Math.max(1, ph));
     }
 
+    /** Breite des Lesebereichs fuer den Zettel: die Blase reicht bis ~0,162, ab ~0,172 beginnt der Rand des Turmfensters. */
+    static final double ZETTEL_BREITE = 0.17;
+
+    /**
+     * Bereich der Namen im Zettel der Clan-Verwaltung links neben dem Turmfenster: {oben, unten} relativ zur Bildhoehe,
+     * {@code null} = kein Zettel (keine weisse Blase). Autor 22.11. (Server-Fotos 21./22.11.): die Ueberschrift "Message
+     * from the Clan Administration" steht weiss auf der Karte UEBER der Blase (hoechstens ~36 % weisse Punkte je Zeile),
+     * fette Namenszeilen in der Blase haben nur noch 11..28 % Weiss. Darum: Oberkante = erste von 3 Zeilen am Stueck, die
+     * fast ganz weiss sind (Rand der Blase ueber der ersten Namenszeile, bis 0,45 gesucht). Unterkante = gelber Stift-Knopf
+     * (sieht die Clan-Verwaltung) oder das Blasenende (6 Zeilen am Stueck fast ohne Weiss). Bis zu 20 Zeilen (Autor 21.11.).
+     */
+    static double[] zettelBereich(java.awt.image.BufferedImage b) {
+        if (b == null || b.getWidth() < 50 || b.getHeight() < 50) return null;
+        int h = b.getHeight(), x0 = (int) (b.getWidth() * 0.02), x1 = (int) (b.getWidth() * 0.16);
+        int oben = -1, amStueck = 0;
+        for (int y = (int) (h * 0.10); y < (int) (h * 0.45); y++) {
+            amStueck = anteil(b, y, x0, x1, false) >= 85 ? amStueck + 1 : 0;
+            if (amStueck == 3) {
+                oben = y - 2;
+                break;
+            }
+        }
+        if (oben < 0) return null;
+        int bis = (int) (h * 0.95), unten = bis, dunkel = 0;
+        for (int y = oben + 3; y < bis; y++) {
+            if (anteil(b, y, x0, x1, true) >= 25) {
+                unten = y;
+                break;
+            }
+            dunkel = anteil(b, y, x0, x1, false) < 5 ? dunkel + 1 : 0;
+            if (dunkel >= 6) {
+                unten = y - 5;
+                break;
+            }
+        }
+        if (unten - oben < 8) return null;
+        return new double[] {oben / (double) h, unten / (double) h};
+    }
+
+    /** Anteil (Prozent) fast weisser bzw. gelber Punkte einer Bildzeile im Bereich x0..x1 (jeder 2. Punkt). */
+    private static int anteil(java.awt.image.BufferedImage b, int y, int x0, int x1, boolean gelb) {
+        int treffer = 0, n = 0;
+        for (int x = x0; x < x1; x += 2) {
+            int rgb = b.getRGB(x, y), r = (rgb >> 16) & 255, g = (rgb >> 8) & 255, bl = rgb & 255;
+            if (gelb ? r > 200 && g > 130 && bl < 120 && r - bl > 100 : r > 230 && g > 230 && bl > 230) treffer++;
+            n++;
+        }
+        return n == 0 ? 0 : treffer * 100 / n;
+    }
+
     /**
      * Nach der Erkundung: Turm nach Autors Regeln -- erst der Spielername, dann (nur Titanen, nur bei Autor) der meiste
      * Ruhm ohne Temple. Leer = wie bisher (leere Tuerme zuerst, sonst zufaellig).
@@ -806,16 +982,14 @@ public final class ClanWarMode implements GameMode {
                         .filter(t -> !gesperrteTuerme.contains(t.schluessel()) || nurNamensGesperrt.contains(t.schluessel()))
                         .filter(t -> !fremderName(t))   // Pruefer 29.10.: auch hier nie in einen fremden (Autor 23.10.)
                         .toList();
-                List<Turm> ohneTempel = mitRuhm.stream().filter(t -> !erkundet.get(t.schluessel()).tempel()).toList();
-                List<Turm> wahl = ohneTempel.isEmpty() ? mitRuhm : ohneTempel;
-                Optional<Turm> best = wahl.stream().max(java.util.Comparator.comparingInt(t -> erkundet.get(t.schluessel()).ruhm()));
+                Optional<Turm> best = meisterRuhm(mitRuhm, t -> erkundet.get(t.schluessel()), !TitanElixier.umtauschMoeglich());
                 if (best.isPresent()) {
                     TurmInfo i = erkundet.get(best.get().schluessel());
                     Log.info("Clan-Krieg", Sprache.t("Titan squad: \"" + ich + "\" not at any outpost -- most glory: \"" + i.titel()
-                            + "\" (" + i.ruhm() + ")" + (ohneTempel.isEmpty() ? ", only temples left" : ", no temple") + ".",
+                            + "\" (" + i.ruhm() + ")" + (i.tempel() ? ", temple" : ", no temple") + ".",
                             "Titanen-Trupp: \"" + ich + "\" steht an keinem Outpost -- meister Ruhm: \"" + i.titel()
-                            + "\" (" + i.ruhm() + ")" + (ohneTempel.isEmpty() ? ", es gibt nur Tempel" : ", kein Tempel") + "."));
-                    zielNachName = ohneTempel.isEmpty();   // einziger Tempel: dann trotz Sperrliste dorthin
+                            + "\" (" + i.ruhm() + ")" + (i.tempel() ? ", Tempel" : ", kein Tempel") + "."));
+                    zielNachName = i.tempel();   // Tempel (einziger, oder Umtausch moeglich): dann trotz Sperrliste dorthin
                     return Optional.of(Map.entry(sorte, best.get()));
                 }
             }
@@ -828,6 +1002,12 @@ public final class ClanWarMode implements GameMode {
 
     /** Nur wegen ihres NAMENS gesperrt -- wird im Notfall wieder aufgehoben. */
     private final List<String> nurNamensGesperrt = new ArrayList<>();
+    /**
+     * Server 21.11. 14:23: der Notausgang hob die Sperrliste auf, beim erneuten Oeffnen griff die Namenspruefung aber
+     * wieder ("This tower is on the skip list") -- 4x im Kreis, Titan nicht gesetzt. Nach dem Aufheben gilt sie in diesem
+     * Krieg darum gar nicht mehr.
+     */
+    private boolean sperrlisteAufgehoben;
 
     /** Fuer die Zufallswahl unter gleich schlechten Tuermen. */
     private final java.util.Random zufall = new java.util.Random();
@@ -1034,6 +1214,7 @@ public final class ClanWarMode implements GameMode {
         gesperrteTuerme.clear();
         oeffnenJeTurm.clear();
         nurNamensGesperrt.clear();
+        sperrlisteAufgehoben = false;
         erkundet.clear();
         erkundenTurm = null;
         erkundenGesehen = zielNachName = nameVersucht = false;
@@ -1497,6 +1678,10 @@ public final class ClanWarMode implements GameMode {
             boolean beide = gesehen >= 2 || zuletztSchilder >= 2;
             Kriegsplan.aufstellungErledigt(beide || normalGesetzt, beide || titanGesetzt);
 
+            // Konrad 20.11. (Bericht UJQ8): beide Trupps standen schon, nichts umzusetzen -- trotzdem hiess es
+            // "Fertig: 0 Durchlaeufe" (in der neuen Schlusszeile sogar "0 von 1, dann abgebrochen"), und es sah aus, als
+            // waere der Krieg nicht gesetzt. Steht mindestens ein Trupp, ist der Auftrag erledigt: ein Durchlauf.
+            if (beide || normalGesetzt || titanGesetzt) runs.completeRun();
             runs.progress(Sprache.t("Deployment done", "Aufstellung fertig"));
             tempoRundeFertig();
             return Outcome.FINISHED;
@@ -1807,7 +1992,7 @@ public final class ClanWarMode implements GameMode {
         // So kann Autor spaeter weitere dazunehmen -- cw_skip_3, cw_skip_4
         // --, ohne dass am Code etwas geaendert werden muss.
         // Nach dem Spielernamen gewaehlt (oder einziger Tempel): dorthin trotz Sperrliste (Autor 17.10.).
-        String gesperrterName = zielNachName ? null : gesperrterTurmname(screen, ctx);
+        String gesperrterName = zielNachName || sperrlisteAufgehoben ? null : gesperrterTurmname(screen, ctx);
         if (gesperrterName != null) {
             Log.info("Clan-Krieg", Sprache.t("This tower is on the skip list ("
                     + gesperrterName + "). The squad goes elsewhere.",
@@ -1940,9 +2125,23 @@ public final class ClanWarMode implements GameMode {
             }
             if (offenerTurm == Sorte.AUSSENPOSTEN && !elementGeprueft && ctx.visible(screen, T_DEPLOY_SQUAD)) {
                 elementGeprueft = true;
-                elementPflicht = elementPflichtImBild(ctx);
+                String elementText = elementTextImBild(ctx);
+                elementPflicht = elementPflicht(elementText);
                 if (elementPflicht) Log.info("Clan-Krieg", Sprache.t("Outpost with an element requirement -- the titans go in with \"Deploy the best\".",
                         "Outpost mit Element-Pflicht -- die Titanen kommen mit \"Deploy the best\"."));
+                // Autor 21.11.: verlangt der Turm EIN Element, soll spaeter vorher das Titanen-Elixier umgetauscht werden.
+                // Der Klickweg fehlt noch (Fotoserie) -- jetzt nur melden; bei Schalter aus passiert nichts weiter.
+                TitanElixier.Element verlangt = verlangtesElement(elementText);
+                if (verlangt != null) {
+                    String stand = TitanElixier.umtauschMoeglich() ? Sprache.t("on", "an")
+                            : TitanElixier.schalterAn() ? Sprache.t("switch on, click path still missing", "Schalter an, Klickweg fehlt noch")
+                            : Sprache.t("still off", "noch aus");
+                    Log.info("Clan-Krieg", Sprache.t("Titan tower requires " + verlangt.anzeige() + " -- elixir exchange (" + stand + ")",
+                            "Titanen-Turm verlangt " + verlangt.anzeige() + " -- Elixier-Umtausch (" + stand + ")"));
+                } else if (elementPflicht) {
+                    Log.info("Clan-Krieg", Sprache.t("Element requirement seen, but the element was not readable: \"" + elementText.strip() + "\"",
+                            "Element-Pflicht gesehen, aber das Element war nicht lesbar: \"" + elementText.strip() + "\""));
+                }
             }
             // Pruefer 29.10.: "Deploy squad" (586,204) liegt genau dort, wo auf der Karte "Editing mode" ist. Darum direkt
             // vor dem Klick noch ein frisches Bild: ist das Turmfenster inzwischen zu (oder "Editing mode" zu sehen), wird
@@ -2709,6 +2908,7 @@ public final class ClanWarMode implements GameMode {
                     + "Turm stehen als gar nicht."));
             gesperrteTuerme.removeAll(nurNamensGesperrt);
             nurNamensGesperrt.clear();
+            sperrlisteAufgehoben = true;
             return Outcome.ACTED;   // naechstes Bild sucht neu
         }
 

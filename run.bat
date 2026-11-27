@@ -8,7 +8,7 @@ if not exist "target\hustle-bot.jar" (
   exit /b 1
 )
 rem ---------------------------------------------------------------------
-rem  -Xmx192m (02.10.: vorher 512m, im Paket 1g)  --  die Speicherbremse
+rem  -Xmx512m (21.11.: 192m reichte fuer 3.151 nicht -> OutOfMemoryError; 512m ist nur die Obergrenze)  --  die Speicherbremse
 rem
 rem  Ohne diese Angabe darf sich Java ein Viertel des gesamten
 rem  Arbeitsspeichers nehmen. Es BRAUCHT das nicht -- der Bot haelt nur ein
@@ -26,5 +26,5 @@ rem  Prozessorkern eigene Bereiche an und braucht dafuer selbst Speicher.
 rem  Fuer ein Programm dieser Groesse ist der schlichte der schnellere und
 rem  sparsamere.
 rem ---------------------------------------------------------------------
-java -Xmx192m -Xms32m -XX:+UseSerialGC -XX:MaxHeapFreeRatio=30 -XX:MinHeapFreeRatio=10 -XX:ReservedCodeCacheSize=48m -Xss512k -jar target\hustle-bot.jar
+java -Xmx512m -Xms32m -XX:+UseSerialGC -XX:MaxHeapFreeRatio=30 -XX:MinHeapFreeRatio=10 -XX:ReservedCodeCacheSize=48m -Xss512k -jar target\hustle-bot.jar
 pause

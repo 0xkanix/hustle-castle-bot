@@ -312,6 +312,7 @@ public final class ArenaSchicht {
         ArenaStand.Stand echt = ArenaStand.chatGeradeOffen() ? null : ArenaStand.aktuell();
         SchichtSteuerung.Anzeige a = steuerung.anzeige(echt, jetzt);
         if (echt != null) zuletzt = echt;
+        if (zuletzt != null && ArenaStand.beendetNach(zuletzt.um())) zuletzt = null;   // Arena fuer den Bot vorbei: Seitenfenster zu
         // Waehrend Kommentar/Grund-Frage bleibt das Seitenfenster stehen, auch wenn die Pyramide kurz weg ist.
         // Autor 29.10.: "das Seitenfenster ist viel zu selten offen" -- es steht neben dem Spiel und verdeckt nichts: den
         // letzten Stand bis SEITE_HALTBAR_MS weiter zeigen (Erkunden, Vergleichsfenster, Ergebnis). Rahmen nur bei echter

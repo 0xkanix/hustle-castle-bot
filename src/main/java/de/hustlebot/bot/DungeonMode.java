@@ -469,6 +469,9 @@ public final class DungeonMode implements GameMode {
      * Faellt, sobald der Bildschirm verschwindet -- ein Schalter, keine Uhr.
      */
     private boolean deployedThisScreen = false;
+
+    /** Autor 21.11.: fehlen die Kaempferbilder dieses Kontos oder passen sie nicht, nimmt der Bot sie selbst auf. */
+    private final Kaempferbilder kaempferbilder = new Kaempferbilder("Verlies");
     /** Wann auf diesem Bildschirm aufgestellt wurde. */
     private long deployGeklicktUm = 0;
     /** Seit wann "Ready" zu sehen ist, ohne dass aufgestellt wurde (0 = nicht). */
@@ -667,8 +670,39 @@ public final class DungeonMode implements GameMode {
     private long searchWaitingSince = 0;
     private int searchRestarts = 0;
 
-    /** Mit wem gespielt wird. */
-    public enum Teammate { RANDOM, FRIEND }
+    /**
+     * Mit wem gespielt wird. CLAN (18.11., Event-Quest "Go to a Dungeon with a clan mate"): erst im
+     * Clan-Chat fragen, dann im Verlies "Clan" -- siehe VerliesClan.
+     */
+    public enum Teammate { RANDOM, FRIEND, CLAN }
+
+    // ---- Mit einem Clan-Mitglied (Autor 18.11.) ---------------------------
+    /** Das "Thanks" im Verlies-Chat nach der letzten Runde. */
+    private final VerliesClan clan = new VerliesClan();
+    /** Die Frage im Clan-Chat ist erledigt (gesendet oder nicht moeglich) -- einmal je Auftrag. */
+    private boolean clanChatErledigt = false;
+    /**
+     * Die Entscheidungen (Autor 19.11.): bis zu 10 min warten, dabei in den Clan-Chat schauen ("in 5 min" -> neu einladen,
+     * "can't" -> aufgeben), "Thanks" beim vorletzten Stuetzpunkt im Verlies-Chat, solange der Mitspieler da ist -- ist er
+     * schon weg, im Clan-Chat (21:25).
+     */
+    private ClanVerliesPlan clanPlan = new ClanVerliesPlan(VerliesClan.eigeneTexte(1));
+    /** Die eigenen Texte dieses Auftrags (fuer einen frischen Plan in der naechsten Runde). */
+    private List<String> clanTexte = VerliesClan.eigeneTexte(1);
+    /** Wann zuletzt "Clan" gedrueckt wurde, und wie oft in dieser Runde. */
+    private long clanEingeladenUm = 0;
+    private int clanEinladungen = 0;
+    /** Niemand online / niemand hat angenommen: Fenster zu und den Modus mit Hinweis beenden. */
+    private boolean clanAufgegeben = false;
+    private boolean clanFensterZu = false;
+    /** Der Satz fuer endeHinweis(). */
+    private String clanHinweis;
+    /** So oft wird in einer Runde hoechstens "Clan" gedrueckt (falls die Einladung verpufft). */
+    private static final int CLAN_EINLADUNGEN_MAX = 3;
+
+    private ClanVerliesPlan neuerClanPlan() {
+        return new ClanVerliesPlan(clanTexte);
+    }
 
     private Teammate teammate = Teammate.RANDOM;
     /** Anzeigename fuer Meldungen -- bei mehreren "Wetter, Robin, Locke". */
@@ -897,6 +931,7 @@ public final class DungeonMode implements GameMode {
                 T_INVITE_PARTNER, T_INVITE_SENT, T_START_JOURNEY,
                 T_INVITE_ACCEPT, T_INVITE_DECLINE, T_ONLINE, T_PREVIOUS_SQUAD));
         list.addAll(FreundesChat.vorlagen());
+        list.addAll(VerliesClan.vorlagen());
         list.addAll(Arrays.asList(EFFECT_CLASSES));
         list.addAll(Arrays.asList(PRIORITY_UNITS));
         list.addAll(Arrays.asList(PRIORITY_NAMES));
@@ -924,6 +959,7 @@ public final class DungeonMode implements GameMode {
         sacrificeDone = false;
         deployMissingSince = 0;
         deployedThisScreen = false;
+        kaempferbilder.neuerStart();   // Autor 21.11.: Kaempferbilder einmal je Modus-Start pruefen
         effectDone = false;
         effectClicks = 0;
         effectPopupClicks = 0;
@@ -963,6 +999,20 @@ public final class DungeonMode implements GameMode {
         freundWaehlenAb = 0;
         folgeEinladenAb = 0;
         neueEinladungsrunde();
+        clan.zuruecksetzen();
+        clanTexte = VerliesClan.eigeneTexte(1);
+        clanPlan = neuerClanPlan();
+        clanChatErledigt = false;
+        clanEingeladenUm = 0;
+        clanEinladungen = 0;
+        clanAufgegeben = false;
+        clanFensterZu = false;
+        clanHinweis = null;
+        if (teammate == Teammate.CLAN) {
+            Log.info("Verlies", Sprache.t("Mode reset. Partner: clan mate (ask in the clan chat, then \"Clan\")",
+                    "Modus zurueckgesetzt. Mitspieler: Clan-Mitglied (erst im Clan-Chat fragen, dann \"Clan\")"));
+            return;
+        }
         Log.info("Verlies", Sprache.t(
                 "Mode reset. Partner: "
                 + (teammate != Teammate.FRIEND ? "random"
@@ -1109,6 +1159,13 @@ public final class DungeonMode implements GameMode {
             return Outcome.WAITING;
         }
 
+        // --- 1d. Mit einem Clan-Mitglied: aufgeben (Fenster zu, Ende mit Hinweis) oder nach der letzten Runde
+        // "Thanks" im Verlies-Chat. Vor dem Abschlussfenster -- das Danke kommt, bevor es geschlossen wird.
+        if (teammate == Teammate.CLAN) {
+            Outcome c = clanVorab(screen, ctx, runs);
+            if (c != null) return c;
+        }
+
         // --- 2. Verlies abgeschlossen. Ueber das X hinaus und neu starten. ---
         if (ctx.visible(screen, T_JOURNEY_DONE)) {
             // Mit einem Freund geht es direkt aus diesem Fenster weiter,
@@ -1252,7 +1309,14 @@ public final class DungeonMode implements GameMode {
                         "Der Mitspieler ging direkt nach dem Boss-Kampf -- kurz warten, ob das Verlies als fertig gilt."));
             }
             if (nachBoss && System.currentTimeMillis() - allyLeftNachBossSeit < BOSS_FERTIG_FRIST_MS) {
-                if (isDungeonComplete(screen, ctx)) return handleDungeonMap(screen, ctx, runs);
+                if (isDungeonComplete(screen, ctx)) {
+                    // Clan-Kamerad nach dem Boss gegangen (19.11. 21:25): das Thanks kommt in den Clan-Chat
+                    if (teammate == Teammate.CLAN) {
+                        Outcome c = clanAufKarte(screen, ctx, runs);
+                        if (c != null) return c;
+                    }
+                    return handleDungeonMap(screen, ctx, runs);
+                }
                 return Outcome.WAITING;
             }
             if (seen != null) {
@@ -1302,6 +1366,12 @@ public final class DungeonMode implements GameMode {
         }
 
         if (abortReason != null) {
+            // Clan-Kamerad hat das Verlies verlassen (19.11. 21:25): vor dem Ausstieg das Thanks in den Clan-Chat (nur ab
+            // dem vorletzten Stuetzpunkt, siehe clanAufKarte)
+            if (teammate == Teammate.CLAN && isDungeonMap(screen, ctx)) {
+                Outcome c = clanAufKarte(screen, ctx, runs);
+                if (c != null) return c;
+            }
             return handleAbort(screen, ctx, runs);
         }
 
@@ -1353,6 +1423,14 @@ public final class DungeonMode implements GameMode {
         // Aufstellbildschirm verschwindet -- also genau dann, wenn ein neuer
         // Stuetzpunkt beginnt.
         boolean deployVisible = false;
+
+        // Autor 21.11. (Robin, anderes Konto): "Wenn er noch keine Bilder fuer diesen Account hat bezueglich den
+        // Einheiten, soll er sie machen und dann erst den gewuenschten Modus spielen." Nur auf dem Aufstellbildschirm
+        // (Zeile "Drag and drop dwellers ...") und bevor aufgestellt ist; einmal je Modus-Start.
+        if (!deployedThisScreen && ctx.matcher().has(T_DEPLOY_SCREEN) && ctx.visible(screen, T_DEPLOY_SCREEN)) {
+            Outcome bilder = kaempferbilder.pruefen(screen, ctx);
+            if (bilder != null) return bilder;
+        }
 
         // Welcher Knopf zuerst: Autors Einstellung (!settings verlies ...).
         // Bei "previous" der eine "Previous Squad", bei "best" jede Vorlage,
@@ -1684,6 +1762,10 @@ public final class DungeonMode implements GameMode {
                     return Outcome.ACTED;
                 }
             }
+        } else if (teammate == Teammate.CLAN) {
+            // Mitspielerwahl erkannt am Knopf "Random" daneben (oder am Clan-Bild): "Clan", Nachricht, "Send".
+            Outcome c = clanEinladen(screen, ctx, runs);
+            if (c != null) return c;
         } else {
             if (click(screen, ctx, T_RANDOM, teammate == Teammate.FRIEND
                     ? Sprache.t("Search for a random partner (" + friendName + " is gone)", "Zufaelligen Mitspieler suchen (" + friendName + " ist weg)")
@@ -1823,6 +1905,11 @@ public final class DungeonMode implements GameMode {
                 if (!runAborted && runs.isDone()) return Outcome.FINISHED;
             }
 
+            // Mit einem Clan-Mitglied: vor dem Weg zur Karte einmal im Clan-Chat fragen (Autor 18.11.).
+            if (teammate == Teammate.CLAN && !clanChatErledigt) {
+                return clanChatFragen(ctx, runs);
+            }
+
             if (clickAny(screen, ctx, T_MAP_BUTTON, Sprache.t("Open the world map", "Weltkarte oeffnen"))) {
                 searchingDungeon = true;
                 mapSwipes = 0;
@@ -1839,6 +1926,11 @@ public final class DungeonMode implements GameMode {
             if (freundEingeladenUm > 0) {
                 freundEingeladenUm = 0;
                 freundWiederDa();
+            }
+            // Mit einem Clan-Kameraden: "Thanks" im Verlies-Chat zur rechten Zeit (Autor 19.11.).
+            if (teammate == Teammate.CLAN) {
+                Outcome c = clanAufKarte(screen, ctx, runs);
+                if (c != null) return c;
             }
             return handleDungeonMap(screen, ctx, runs);
         }
@@ -1876,7 +1968,10 @@ public final class DungeonMode implements GameMode {
         // rotes X, wird es gedrueckt. Rettet den Lauf auch bei Fenstern,
         // fuer die es noch gar keine Vorlage gibt.
         if (Stoerfenster.notausgang(screen, ctx, "Verlies", unknownScreens)) {
-            runs.progress(Sprache.t("Unknown window closed", "Unbekanntes Fenster geschlossen"));
+            // 15.11. / X3A2: nur als Fortschritt zaehlen, wenn der Klick das Bild wirklich geaendert hat.
+            if (BotContext.notausgangZaehlt(ctx.letzteWartungGeaendert())) {
+                runs.progress(Sprache.t("Unknown window closed", "Unbekanntes Fenster geschlossen"));
+            }
             return Outcome.ACTED;
         }
         if (unknownScreens > 150) {
@@ -2141,6 +2236,14 @@ public final class DungeonMode implements GameMode {
         participateAttempts++;
         insideDungeon = true;
         betretenUm = System.currentTimeMillis();
+        // Clan (18.11.): neue Runde -- die Warte-Uhr und die Zahl der Einladungen fangen neu an (nur nach einer gespielten
+        // Runde; ein "in 5 min" der laufenden Einladung bleibt stehen).
+        if (clanPlan.zustand() == ClanVerliesPlan.Zustand.ANGENOMMEN) {
+            clanPlan = neuerClanPlan();
+            clan.zuruecksetzen();
+        }
+        clanEingeladenUm = 0;
+        clanEinladungen = 0;
         runCounted = false;
         blockGeprueft = false;
         runAborted = false;
@@ -3638,6 +3741,225 @@ public final class DungeonMode implements GameMode {
     }
 
     // ------------------------------------------------------------------
+    //  Mit einem Clan-Mitglied (18.11., siehe VerliesClan)
+    // ------------------------------------------------------------------
+
+    /**
+     * Aus dem Mitspieler-Wort des Starts den Weg machen: "friend"/"friendwait" = Freund, "clan" = Clan-Mitglied,
+     * alles andere (auch leer) = zufaellig. Wie bisher in BotEngine.start, jetzt mit "clan".
+     */
+    public static Teammate teammateAus(String wort) {
+        if (wort == null) return Teammate.RANDOM;
+        String w = wort.trim().toLowerCase(java.util.Locale.ROOT);
+        if (w.startsWith("friend")) return Teammate.FRIEND;
+        if (w.equals("clan")) return Teammate.CLAN;
+        return Teammate.RANDOM;
+    }
+
+    @Override
+    public String endeHinweis() {
+        String h = clanHinweis;
+        clanHinweis = null;
+        return h;
+    }
+
+    /** Wie viele Runden noch fehlen -- fuer die Texte ("1 round" / "3 rounds"). */
+    private static int clanRestRunden(RunTracker runs) {
+        return Math.max(1, runs.targetRuns() - runs.completedRuns());
+    }
+
+    /** Aufgeben: Hinweis merken, Fenster zu, dann FINISHED (siehe clanVorab). */
+    private void clanAufgeben(String hinweisEn, String hinweisDe) {
+        clanAufgegeben = true;
+        clanHinweis = Sprache.t(hinweisEn, hinweisDe);
+        Log.info("Verlies", clanHinweis);
+    }
+
+    /**
+     * Schritt 1d: aufgegeben -> Verlies-Fenster schliessen und den Modus beenden. Null = normal weiter.
+     */
+    private Outcome clanVorab(Mat screen, BotContext ctx, RunTracker runs) {
+        if (clanAufgegeben) {
+            if (!clanFensterZu && !visibleAny(screen, ctx, T_MAP_BUTTON)) {
+                clanFensterZu = true;
+                if (click(screen, ctx, T_CLOSE_X, Sprache.t("Close the Dungeon window (no clan mate)",
+                        "Verlies-Fenster schliessen (kein Clan-Mitglied)"))) {
+                    ctx.sleepUntilChanged(1500);
+                    return Outcome.ACTED;
+                }
+            }
+            insideDungeon = false;
+            Log.info("Verlies", Sprache.t("Clan mate quest: stopping for now.",
+                    "Clan-Quest: fuers Erste Schluss."));
+            return Outcome.FINISHED;
+        }
+        // Das "Thanks" kommt jetzt auf der Verlieskarte beim vorletzten Stuetzpunkt (clanAufKarte, Autor 19.11.).
+        return null;
+    }
+
+    /** In der Burg: einmal im Clan-Chat fragen. Niemand online -> aufhoeren (nicht warten). */
+    private Outcome clanChatFragen(BotContext ctx, RunTracker runs) {
+        clanChatErledigt = true;
+        clanTexte = VerliesClan.eigeneTexte(clanRestRunden(runs));
+        clanPlan = neuerClanPlan();
+        VerliesClan.ChatErgebnis e = VerliesClan.clanChatSchreiben(ctx, clanRestRunden(runs));
+        Log.info("Verlies", "Clan-Chat: " + e);
+        clanPlan.gefragt();
+        if (e == VerliesClan.ChatErgebnis.NIEMAND_ONLINE) {
+            clanPlan.onlineGelesen(0);
+            clanAufgeben("No clan mate online (0 online in the clan chat) -- the quest \"Go to a Dungeon with a clan mate\" "
+                    + "is tried again later.",
+                    "Kein Clan-Mitglied online (0 online im Clan-Chat) -- die Quest \"Go to a Dungeon with a clan mate\" "
+                    + "spaeter nochmal.");
+            clanFensterZu = true;   // wir stehen in der Burg, es gibt nichts zu schliessen
+            return Outcome.FINISHED;
+        }
+        runs.progress(Sprache.t("Clan chat: asked for a partner", "Clan-Chat: nach Mitspieler gefragt"));
+        return Outcome.ACTED;
+    }
+
+    /** Mitspielerwahl im Clan-Weg: "Clan", Nachricht, "Send". Null = hier ist nicht die Mitspielerwahl. */
+    private Outcome clanEinladen(Mat screen, BotContext ctx, RunTracker runs) {
+        boolean wahl = (ctx.matcher().has(VerliesClan.T_CLAN) && ctx.visible(screen, VerliesClan.T_CLAN))
+                || ctx.visible(screen, T_RANDOM);
+        if (!wahl) return null;
+        long jetzt = System.currentTimeMillis();
+        if (clanPlan.aufgegeben()) {
+            clanAufgeben("Clan mate quest given up (" + clanPlan.grund() + ") -- tried again later.",
+                    "Clan-Quest aufgegeben (" + clanPlan.grund() + ") -- spaeter nochmal.");
+            return Outcome.ACTED;
+        }
+        if (clanEingeladenUm > 0 && jetzt - clanEingeladenUm < 20_000) return Outcome.WAITING;   // Fenster wechselt noch
+        if (clanEinladungen >= CLAN_EINLADUNGEN_MAX) {
+            clanAufgeben("The clan invite did not go out " + CLAN_EINLADUNGEN_MAX + " times -- the quest "
+                    + "\"Go to a Dungeon with a clan mate\" is tried again later.",
+                    "Die Clan-Einladung ging " + CLAN_EINLADUNGEN_MAX + " Mal nicht hinaus -- die Quest "
+                    + "\"Go to a Dungeon with a clan mate\" spaeter nochmal.");
+            return Outcome.ACTED;
+        }
+        clanEinladungen++;
+        clanEingeladenUm = jetzt;
+        if (VerliesClan.imVerliesEinladen(screen, ctx, clanRestRunden(runs), T_INVITE_SEND)) {
+            clanPlan.eingeladen(System.currentTimeMillis());
+            runs.progress(Sprache.t("Clan mate invited", "Clan-Mitglied eingeladen"));
+        }
+        return Outcome.ACTED;
+    }
+
+    /**
+     * "Waiting for a clan mate" (Autor 19.11.): bis zu 10 Minuten im Wartefenster bleiben, ab und zu (sofort bei rotem
+     * Abzeichen am Chat-Pfeil) den Clan-Chat lesen. "in 5 min" -> nach 5 Minuten neu einladen; "can't", niemand online
+     * oder Zeit um -> Cancel und aufgeben (spaeter noch einmal).
+     */
+    private Outcome aufClanWarten(Mat screen, BotContext ctx, RunTracker runs) {
+        long jetzt = System.currentTimeMillis();
+        ClanVerliesPlan.Schritt s = clanPlan.imWartefenster(jetzt, VerliesClan.abzeichenAmChatPfeil(ctx.frame()));
+        switch (s) {
+            case WARTEN -> {
+                if (!onCooldown("clan_warten_log")) {
+                    long rest = Math.max(0, clanPlan.wartenBis() - jetzt) / 1000;
+                    Log.info("Verlies", Sprache.t("Waiting for a clan mate, " + rest + " s left.",
+                            "Warte auf ein Clan-Mitglied, noch " + rest + " s."));
+                    cooldowns.put("clan_warten_log", jetzt + 30_000);
+                }
+                return Outcome.WAITING;
+            }
+            case CHAT_ANSEHEN -> {
+                VerliesClan.ChatLesung l = VerliesClan.clanChatLesen(ctx);
+                ClanVerliesPlan.Antwort a = clanPlan.chatGelesen(l.offen() ? l.zeilen() : null, l.online(),
+                        System.currentTimeMillis());
+                String zeile = clanPlan.letzteAntwortZeile();
+                Log.info("Verlies", Sprache.t("Clan chat checked while waiting: " + a, "Clan-Chat beim Warten angesehen: " + a)
+                        + (l.online() != null ? " (" + l.online() + " online)" : "")
+                        + (a != ClanVerliesPlan.Antwort.SONST ? " -- \"" + zeile + "\"" : ""));
+                if (a != ClanVerliesPlan.Antwort.SONST) {
+                    String folge = switch (a) {
+                        case ZUSAGE -> "Zusage -- der Bot wartet weiter.";
+                        case SPAETER -> "spaeter -- in 5 Minuten neu einladen.";
+                        default -> "Absage -- Einladung zurueck, spaeter nochmal.";
+                    };
+                    ctx.melde("Clan-Verlies: Antwort im Clan-Chat", "\"" + zeile + "\" -> " + folge);
+                }
+                runs.progress(Sprache.t("Clan chat checked", "Clan-Chat angesehen"));
+                return Outcome.ACTED;
+            }
+            case NEU_EINLADEN -> {
+                Log.info("Verlies", Sprache.t("The clan mate wanted to come later -- inviting again.",
+                        "Das Clan-Mitglied wollte spaeter -- neu einladen."));
+                VerliesClan.wartenAbbrechen(screen, ctx, T_CANCEL_SEARCH);
+                clanEingeladenUm = 0;   // gleich wieder "Clan" in der Mitspielerwahl
+                runs.progress(Sprache.t("Clan invite renewed", "Clan-Einladung erneuert"));
+                return Outcome.ACTED;
+            }
+            default -> {
+                VerliesClan.wartenAbbrechen(screen, ctx, T_CANCEL_SEARCH);
+                clanAufgeben("Clan mate quest given up (" + clanPlan.grund() + ") -- the quest \"Go to a Dungeon with a "
+                        + "clan mate\" is tried again later.",
+                        "Clan-Quest aufgegeben (" + clanPlan.grund() + ") -- die Quest \"Go to a Dungeon with a clan mate\" "
+                        + "spaeter nochmal.");
+                runs.progress(Sprache.t("Clan mate search cancelled", "Clan-Suche abgebrochen"));
+                return Outcome.ACTED;
+            }
+        }
+    }
+
+    /**
+     * Auf der Verlieskarte mit einem Clan-Kameraden (Autor 19.11.): beim vorletzten Stuetzpunkt (Balken ab 80 %) einmal
+     * "Thanks" im Verlies-Chat, solange der Mitspieler noch da ist; bei 100 % einmal nachsehen, ob er geantwortet hat.
+     * Null = nichts zu tun, normal weiterspielen.
+     */
+    private Outcome clanAufKarte(Mat screen, BotContext ctx, RunTracker runs) {
+        clanPlan.angenommen();
+        if (!insideDungeon) {
+            // Angenommen, waehrend der Bot nicht als "im Verlies" galt (Autor 19.11.): jetzt ist er wieder im Verlies
+            insideDungeon = true;
+            if (betretenUm == 0) betretenUm = System.currentTimeMillis();
+        }
+        boolean weg = allyLeftSeen(screen, ctx) != null;
+        // Beim Ausstieg nur noch, wenn der Mitspieler gegangen ist (dann Thanks im Clan-Chat, 19.11. 21:25)
+        if ((runAborted || abortReason != null) && !weg && !clanPlan.istMitspielerWeg()) return null;
+        // nur in der letzten Runde -- sonst passt der Abschied nicht
+        boolean letzteRunde = runCounted ? runs.isDone() : runs.completedRuns() + 1 >= runs.targetRuns();
+        if (!letzteRunde) return null;
+        int prozent = VerliesClan.fortschrittProzent(ctx.frame());
+        if (prozent < 0 && ctx.visible(screen, T_PROGRESS_100)) prozent = 100;
+        switch (clanPlan.dankJetzt(prozent, weg)) {
+            case VERLIES_CHAT -> {
+                Log.info("Verlies", Sprache.t("Progress " + prozent + " % -- saying \"Thanks\" in the dungeon chat.",
+                        "Fortschritt " + prozent + " % -- \"Thanks\" im Verlies-Chat."));
+                switch (clan.dankSagen(ctx)) {
+                    case GESENDET -> {
+                        clanPlan.gedankt();
+                        runs.progress(Sprache.t("Dungeon chat: Thanks sent", "Verlies-Chat: Thanks gesendet"));
+                    }
+                    // gleich danach (naechstes Bild) kommt das Thanks in den Clan-Chat
+                    case MITSPIELER_WEG -> clanPlan.mitspielerWeg();
+                    default -> clanPlan.dankAusgelassen();
+                }
+                return Outcome.ACTED;
+            }
+            case CLAN_CHAT -> {
+                Log.info("Verlies", Sprache.t("Progress " + prozent + " %, the clan mate already left -- \"Thanks\" in the "
+                        + "clan chat.", "Fortschritt " + prozent + " %, der Clan-Kamerad ist schon weg -- \"Thanks\" im Clan-Chat."));
+                if (clan.dankImClanChat(ctx) == VerliesClan.DankErgebnis.GESENDET) {
+                    clanPlan.gedankt();
+                    runs.progress(Sprache.t("Clan chat: Thanks sent", "Clan-Chat: Thanks gesendet"));
+                } else {
+                    clanPlan.dankAusgelassen();
+                }
+                return Outcome.ACTED;
+            }
+            default -> { }
+        }
+        if (clanPlan.antwortPruefenJetzt(prozent, weg)) {
+            clanPlan.antwortGeprueft();
+            if (clan.antwortPruefen(ctx)) clanPlan.mitspielerWeg();
+            return Outcome.ACTED;
+        }
+        return null;
+    }
+
+    // ------------------------------------------------------------------
     //  Mitspielersuche: Wartebildschirm ueberwachen
     // ------------------------------------------------------------------
     /**
@@ -3647,6 +3969,10 @@ public final class DungeonMode implements GameMode {
      * Mitspielerauswahl und startet eine neue Suche.
      */
     private Outcome handleTeammateSearch(Mat screen, BotContext ctx, RunTracker runs) {
+        // Mit einem Clan-Mitglied: hoechstens 5 Minuten, dann aufgeben (nicht neu suchen).
+        if (teammate == Teammate.CLAN) {
+            return aufClanWarten(screen, ctx, runs);
+        }
         // Aus der Freundesliste eingeladen: eigene Regeln, siehe aufFreundWarten().
         if (teammate == Teammate.FRIEND && freundEingeladenUm > 0) {
             freundWartebildGesehen = true;
@@ -5234,7 +5560,11 @@ public final class DungeonMode implements GameMode {
         if (ctx.matcher().has(T_UNIT_DEAD_BAR)) {
             int portrait = (int) (ctx.height() * 0.09);
             int lift = (int) (ctx.height() * 0.055);
-            for (Matcher.Hit bar : ctx.matcher().findAll(screen, T_UNIT_DEAD_BAR, 0.88, 12)) {
+            // Sparsam 20.11.: nur unterhalb der Zeile suchen -- Funde darueber wurden ohnehin verworfen (gemessen:
+            // unit_dead_bar kostete im Verlies 10,4 s je Run im ganzen Bild). Gleiche Werte je Stelle, siehe findAllImBereich.
+            int oben = Math.max(0, minY - 40);
+            org.opencv.core.Rect unten = new org.opencv.core.Rect(0, oben, screen.width(), screen.height() - oben);
+            for (Matcher.Hit bar : ctx.matcher().findAllImBereich(screen, T_UNIT_DEAD_BAR, 0.88, 12, unten)) {
                 if (bar.centerY() <= minY) continue;
                 int cx = bar.centerX();
                 int cy = bar.centerY() - lift;

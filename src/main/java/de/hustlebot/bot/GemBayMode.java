@@ -3,6 +3,7 @@ package de.hustlebot.bot;
 import de.hustlebot.core.GemBayplan;
 import de.hustlebot.core.Log;
 import de.hustlebot.core.Matcher;
+import de.hustlebot.core.Sprache;
 import org.opencv.core.Mat;
 
 import java.awt.image.BufferedImage;
@@ -162,9 +163,9 @@ public final class GemBayMode implements GameMode {
     private static final long FREMDES_JA_MS = 2500;
     /** Hoechstens so viele Fotos je Besuch nach logs\gembay-*.png (fuer neue Vorlagen). */
     private static final int MAX_FOTOS = 10;
-    private static final String ZU_VIELE_KARTENKLICKS = "\"Map\" und \"Gem Bay\" auf der Weltkarte wurden "
-            + GemBayGrenzen.MAX_KARTEN_KLICKS + "-mal angeklickt, aber kein Gem-Bay-Fenster ging auf -- "
-            + "der Besuch wird beendet, zurueck in die Burg.";
+    private static final String ZU_VIELE_KARTENKLICKS = Sprache.t("\"Map\" and \"Gem Bay\" on the world map were clicked ", "\"Map\" und \"Gem Bay\" auf der Weltkarte wurden ")
+            + GemBayGrenzen.MAX_KARTEN_KLICKS + Sprache.t(" times, but no Gem Bay window opened -- ", "-mal angeklickt, aber kein Gem-Bay-Fenster ging auf -- ")
+            + Sprache.t("the visit ends, back to the castle.", "der Besuch wird beendet, zurueck in die Burg.");
 
     private enum Phase { NORMAL, KISTEN, WERBUNG }
 
@@ -343,20 +344,20 @@ public final class GemBayMode implements GameMode {
         // Zeitgrenze je Besuch (vorher 45 Minuten je Reise): danach sauber zurueck in die Burg.
         // Steigen die Siege noch, darf die laufende Reise zu Ende (GemBayGrenzen.besuchAbgelaufen).
         if (!fertig && grenzen.besuchAbgelaufen(jetzt)) {
-            abbrechen(ctx, "zeitgrenze", "Nach " + grenzen.besuchMs(jetzt) / 60_000 + " Minuten nicht fertig -- "
-                    + "es geht sauber zurueck in die Burg" + (grenzen.kampfMoeglich(jetzt)
-                    ? " (ein laufender Kampf wird noch abgewartet, kein rotes X mitten im Kampf)" : "") + ".");
+            abbrechen(ctx, "zeitgrenze", Sprache.t("After ", "Nach ") + grenzen.besuchMs(jetzt) / 60_000 + Sprache.t(" minutes not done -- ", " Minuten nicht fertig -- ")
+                    + Sprache.t("going back to the castle cleanly", "es geht sauber zurueck in die Burg") + (grenzen.kampfMoeglich(jetzt)
+                    ? Sprache.t(" (a running fight is waited for, no red X in the middle of a fight)", " (ein laufender Kampf wird noch abgewartet, kein rotes X mitten im Kampf)") : "") + ".");
         }
         // Der Totmann im Motor haelt nach 15 Minuten ohne Fortschritt an -- und dann steht die ganze
         // Warteschlange (Pruefung 05.10.). Vorher selbst sauber heim.
         if (!fertig && runs.idleSeconds() * 1000 >= GemBayGrenzen.LEERLAUF_MAX_MS) {
-            abbrechen(ctx, "leerlauf", "Seit " + runs.idleSeconds() / 60 + " Minuten kein Fortschritt -- "
-                    + "es geht sauber zurueck in die Burg, bevor der Bot ganz anhaelt.");
+            abbrechen(ctx, "leerlauf", Sprache.t("No progress for ", "Seit ") + runs.idleSeconds() / 60 + Sprache.t(" minutes -- ", " Minuten kein Fortschritt -- ")
+                    + Sprache.t("going back to the castle cleanly before the bot stops completely.", "es geht sauber zurueck in die Burg, bevor der Bot ganz anhaelt."));
         }
         if (fertig) grenzen.heimwegBeginnt(jetzt);
         if (grenzen.heimwegZuLang(jetzt)) {
-            warnung("Der Weg zurueck in die Burg klappt seit " + grenzen.heimwegMs(jetzt) / 60_000
-                    + " Minuten nicht -- Gem Bay endet hier, der naechste Modus findet selbst heim.");
+            warnung(Sprache.t("The way back to the castle has not worked for ", "Der Weg zurueck in die Burg klappt seit ") + grenzen.heimwegMs(jetzt) / 60_000
+                    + Sprache.t(" minutes -- Gem Bay ends here, the next mode finds its own way home.", " Minuten nicht -- Gem Bay endet hier, der naechste Modus findet selbst heim."));
             foto(ctx, "heimweg");
             return Outcome.FINISHED;
         }
@@ -376,9 +377,9 @@ public final class GemBayMode implements GameMode {
                 grenzen.kampfZeichen(jetzt);
                 wiederbelebungSeit = jetzt;
                 neuBetretenUm = belebtGesehenUm = 0;
-                runs.progress("Gem Bay: Video vorbei");
-                Log.info(WO, "Video vorbei (" + d / 1000 + " s) -- jetzt warten, bis alle Einheiten wieder gruen sind. "
-                        + "Dafuer kurz raus aus der Bucht und wieder hinein (Autor: dann antwortet das Werbe-Netz schneller).");
+                runs.progress(Sprache.t("Gem Bay: video over", "Gem Bay: Video vorbei"));
+                Log.info(WO, Sprache.t("Video over (", "Video vorbei (") + d / 1000 + Sprache.t(" s) -- now waiting until all units are green again. ", " s) -- jetzt warten, bis alle Einheiten wieder gruen sind. ")
+                        + Sprache.t("For that briefly out of the bay and back in (then the ad network answers faster).", "Dafuer kurz raus aus der Bucht und wieder hinein (Autor: dann antwortet das Werbe-Netz schneller)."));
                 return Outcome.ACTED;
             }
             if (!bucht && grenzen.videoZuLang(jetzt)) {
@@ -388,9 +389,9 @@ public final class GemBayMode implements GameMode {
                 // oder die Weltkarte wieder zu sehen ist, auch kein rotes X (Pruefung 05.10.: vorher
                 // ab 180 s erlaubt) -- dann endet der Besuch ueber Zeitgrenze und Heimweg-Grenze.
                 // Wie im Nahrungsvideo bekommt Autor Bescheid.
-                Log.alarm(WO, "Das Video \"Restore all units\" ist nach " + d / 1000 + " s nicht zurueck. "
-                        + "Der Bot drueckt in der Werbung NICHTS (auch kein X) und wartet, bis das Spiel "
-                        + "wieder zu sehen ist -- sonst endet Gem Bay nach der Zeitgrenze. Bitte am Rechner nachsehen.");
+                Log.alarm(WO, Sprache.t("The \"Restore all units\" video is not back after ", "Das Video \"Restore all units\" ist nach ") + d / 1000 + Sprache.t(" s. ", " s nicht zurueck. ")
+                        + Sprache.t("The bot presses NOTHING in the ad (no X either) and waits until the game ", "Der Bot drueckt in der Werbung NICHTS (auch kein X) und wartet, bis das Spiel ")
+                        + Sprache.t("is visible again -- otherwise Gem Bay ends after the time limit. Please check at the PC.", "wieder zu sehen ist -- sonst endet Gem Bay nach der Zeitgrenze. Bitte am Rechner nachsehen."));
                 foto(ctx, "video");
                 grenzen.videoHaengt();
                 phase = Phase.NORMAL;
@@ -438,13 +439,13 @@ public final class GemBayMode implements GameMode {
         if (stoerBlick && ctx.visibleIfKnown(screen, T_KAUF)) {
             kaufGesehenUm = jetzt;
             long offen = kaufOhneKnopf.gesehen(jetzt);
-            if (ctx.clickIfVisibleIfKnown(screen, T_KAUF_NEIN, WO + ": Kauf-Fenster: \"No\" (nie Diamanten)")
-                    || ctx.clickIfVisibleIfKnown(screen, T_X, WO + ": Kauf-Fenster schliessen (nie Diamanten)")) {
+            if (ctx.clickIfVisibleIfKnown(screen, T_KAUF_NEIN, WO + Sprache.t(": buy window: \"No\" (never diamonds)", ": Kauf-Fenster: \"No\" (nie Diamanten)"))
+                    || ctx.clickIfVisibleIfKnown(screen, T_X, WO + Sprache.t(": close the buy window (never diamonds)", ": Kauf-Fenster schliessen (nie Diamanten)"))) {
                 kaufOhneKnopf.vergessen();
-                Log.alarm(WO, "Das Kauf-Fenster \"Buy the missing resources?\" kam -- mit \"No\" weggeklickt, "
-                        + "es wurden KEINE Diamanten ausgegeben. Die Nahrung reicht wohl nicht.");
+                Log.alarm(WO, Sprache.t("The buy window \"Buy the missing resources?\" came up -- closed with \"No\", ", "Das Kauf-Fenster \"Buy the missing resources?\" kam -- mit \"No\" weggeklickt, ")
+                        + Sprache.t("NO diamonds were spent. Probably not enough food.", "es wurden KEINE Diamanten ausgegeben. Die Nahrung reicht wohl nicht."));
                 if (++kauffenster >= 2) {   // zweimal: fuer dieses Zeitfenster Schluss
-                    beenden("Das Kauf-Fenster kam zweimal -- Gem Bay ist fuer dieses Zeitfenster fertig.");
+                    beenden(Sprache.t("The buy window came up twice -- Gem Bay is done for this time window.", "Das Kauf-Fenster kam zweimal -- Gem Bay ist fuer dieses Zeitfenster fertig."));
                 }
                 nahrung = -1;
                 preis = -1;
@@ -455,9 +456,9 @@ public final class GemBayMode implements GameMode {
             // etwas anderes gedrueckt -- nach 30 s endet der Besuch, Autor bekommt Bescheid, und
             // die Heimweg-Grenze beendet Gem Bay, falls das Fenster offen bleibt.
             if (!fertig && offen > GemBayGrenzen.OHNE_KNOPF_MS) {
-                Log.alarm(WO, "Das Kauf-Fenster \"Buy the missing resources?\" ist seit " + offen / 1000 + " s offen, "
-                        + "aber weder \"No\" noch das rote X sind zu erkennen. Der Bot drueckt NICHTS -- bitte nachsehen.");
-                abbrechen(ctx, "kauf", "Kauf-Fenster ohne erkennbares \"No\" -- der Besuch wird beendet.");
+                Log.alarm(WO, Sprache.t("The buy window \"Buy the missing resources?\" has been open for ", "Das Kauf-Fenster \"Buy the missing resources?\" ist seit ") + offen / 1000 + Sprache.t(" s, ", " s offen, ")
+                        + Sprache.t("but neither \"No\" nor the red X can be recognised. The bot presses NOTHING -- please check.", "aber weder \"No\" noch das rote X sind zu erkennen. Der Bot drueckt NICHTS -- bitte nachsehen."));
+                abbrechen(ctx, "kauf", Sprache.t("Buy window without a recognisable \"No\" -- the visit ends.", "Kauf-Fenster ohne erkennbares \"No\" -- der Besuch wird beendet."));
             }
             return warten(ctx);
         }
@@ -483,7 +484,7 @@ public final class GemBayMode implements GameMode {
         // "Cancel"). Sie liegt ueber dem Kisten-Fenster, darum zuerst.
         if ((voll || beendet || obenClaims > 0) && ctx.visibleIfKnown(screen, T_WARNUNG_SATZ)) {
             blind = 0;
-            if (ctx.clickIfVisibleIfKnown(screen, T_CLAIM_WARNUNG, WO + ": Reise beenden bestaetigen (Claim reward in der Warnung)")) {
+            if (ctx.clickIfVisibleIfKnown(screen, T_CLAIM_WARNUNG, WO + Sprache.t(": confirm ending the journey (Claim reward in the warning)", ": Reise beenden bestaetigen (Claim reward in der Warnung)"))) {
                 if (!ctx.warteBisWeg(1500, 0.80, T_CLAIM_WARNUNG)) ctx.sleepUntilChanged(600);
                 ctx.warteAufKnopf(5000, Matcher.DEFAULT_THRESHOLD, T_BELOHNUNG, T_MAP, T_MAP_ALT);
                 return Outcome.ACTED;
@@ -495,14 +496,14 @@ public final class GemBayMode implements GameMode {
         if ((voll || beendet || obenClaims > 0) && ctx.visibleIfKnown(screen, T_KISTE_SATZ)) {
             blind = 0;
             grenzen.kampfVorbei();
-            if (ctx.clickIfVisibleIfKnown(screen, T_CLAIM_KISTE, WO + ": Kiste abholen, Reise beenden (Claim reward)")) {
+            if (ctx.clickIfVisibleIfKnown(screen, T_CLAIM_KISTE, WO + Sprache.t(": claim the chest, end the journey (Claim reward)", ": Kiste abholen, Reise beenden (Claim reward)"))) {
                 if (!beendet) {
                     beendet = true;
                     reisen++;
                     reiseFertig();
-                    runs.progress("Gem Bay: Reise " + reisen + " beendet");
-                    Log.info(WO, "Reise " + reisen + " beendet (Gem Bay chest abgeholt) -- gleich die naechste, solange "
-                            + "der Preis in Nahrung steht.");
+                    runs.progress(Sprache.t("Gem Bay: journey ", "Gem Bay: Reise ") + reisen + Sprache.t(" finished", " beendet"));
+                    Log.info(WO, Sprache.t("Journey ", "Reise ") + reisen + Sprache.t(" finished (Gem Bay chest claimed) -- straight to the next one while ", " beendet (Gem Bay chest abgeholt) -- gleich die naechste, solange ")
+                            + Sprache.t("the price is in food.", "der Preis in Nahrung steht."));
                 }
                 if (!ctx.warteBisWeg(1500, 0.80, T_CLAIM_KISTE)) ctx.sleepUntilChanged(600);
                 ctx.warteAufKnopf(5000, Matcher.DEFAULT_THRESHOLD, T_BELOHNUNG, T_MAP, T_MAP_ALT);
@@ -516,17 +517,17 @@ public final class GemBayMode implements GameMode {
             grenzen.kampfVorbei();
             long offen = endeOhneClaim.gesehen(jetzt);
             String knopf = leer && ctx.visibleIfKnown(screen, T_CLAIM_ROT) ? T_CLAIM_ROT : T_CLAIM;
-            if (ctx.clickIfVisibleIfKnown(screen, knopf, WO + ": Belohnung holen (Claim reward)")) {
+            if (ctx.clickIfVisibleIfKnown(screen, knopf, WO + Sprache.t(": claim the reward (Claim reward)", ": Belohnung holen (Claim reward)"))) {
                 endeOhneClaim.vergessen();
                 if (!beendet) {
                     beendet = true;
                     reisen++;
                     reiseFertig();
-                    runs.progress("Gem Bay: Reise " + reisen + " geschafft");
-                    Log.info(WO, leer ? "Reise " + reisen + " beendet -- alle Einheiten gefallen, das Video ist schon "
-                            + "benutzt. Belohnung geholt, gleich die naechste Reise, solange der Preis in Nahrung steht."
-                            : "Reise " + reisen + " geschafft -- 15 von 15 Siegen. Gleich die naechste, "
-                            + "solange der Preis in Nahrung steht.");
+                    runs.progress(Sprache.t("Gem Bay: journey ", "Gem Bay: Reise ") + reisen + Sprache.t(" done", " geschafft"));
+                    Log.info(WO, leer ? Sprache.t("Journey ", "Reise ") + reisen + Sprache.t(" finished -- all units fell, the video is already ", " beendet -- alle Einheiten gefallen, das Video ist schon ")
+                            + Sprache.t("used. Reward claimed, straight to the next journey while the price is in food.", "benutzt. Belohnung geholt, gleich die naechste Reise, solange der Preis in Nahrung steht.")
+                            : Sprache.t("Journey ", "Reise ") + reisen + Sprache.t(" done -- 15 of 15 wins. Straight to the next one, ", " geschafft -- 15 von 15 Siegen. Gleich die naechste, ")
+                            + Sprache.t("while the price is in food.", "solange der Preis in Nahrung steht."));
                 }
                 // Lauf 1 (06.10.): sleepUntilChanged(3000) kam schon nach 120 ms zurueck (nur die
                 // Knopf-Animation). Jetzt per Kastenblick: erst bis der Knopf weg ist, dann bis das
@@ -542,11 +543,11 @@ public final class GemBayMode implements GameMode {
             // vorbei, es kann kein Kampf laufen ("Rotes X fuehrt zurueck", Autor).
             if (offen > GemBayGrenzen.OHNE_KNOPF_MS) {
                 if (!fertig) {
-                    abbrechen(ctx, "ende", "\"Journey over!\" ist seit " + offen / 1000 + " s zu sehen, aber \"Claim "
-                            + "reward\" (Vorlage " + T_CLAIM + ") passt nicht -- der Besuch wird beendet.");
+                    abbrechen(ctx, "ende", Sprache.t("\"Journey over!\" has been visible for ", "\"Journey over!\" ist seit ") + offen / 1000 + Sprache.t(" s, but \"Claim ", " s zu sehen, aber \"Claim ")
+                            + Sprache.t("reward\" (template ", "reward\" (Vorlage ") + T_CLAIM + Sprache.t(") does not match -- the visit ends.", ") passt nicht -- der Besuch wird beendet."));
                 }
                 if (blindX < MAX_BLIND_X && ctx.clickIfVisibleIfKnown(screen, T_X,
-                        WO + ": \"Journey over!\" schliessen (rotes X, \"Claim reward\" nicht erkannt)")) {
+                        WO + Sprache.t(": close \"Journey over!\" (red X, \"Claim reward\" not recognised)", ": \"Journey over!\" schliessen (rotes X, \"Claim reward\" nicht erkannt)"))) {
                     blindX++;
                     ctx.sleepUntilChanged(1200);
                     return Outcome.ACTED;
@@ -562,7 +563,7 @@ public final class GemBayMode implements GameMode {
                 // P4 (Pruefung 04.10.): frueher ohne Vermerk -- der Bot ging im selben Zeitfenster
                 // alle 20 Minuten wieder hin.
                 if (!fertig && reisen >= maxReisen()) {
-                    beenden(reisen + " Reisen in diesem Besuch geschafft -- Gem Bay ist fuer dieses Zeitfenster fertig.");
+                    beenden(reisen + Sprache.t(" journeys done in this visit -- Gem Bay is done for this time window.", " Reisen in diesem Besuch geschafft -- Gem Bay ist fuer dieses Zeitfenster fertig."));
                 }
                 if (fertig) {
                     beendet = false;
@@ -583,14 +584,14 @@ public final class GemBayMode implements GameMode {
         // gb_to_battle (191x80) ist die teuerste Vorlage (Lauf 1: 191 Suchen, 6,8 s) -- im Kampftakt
         // nur kurz nach einem Klick auf "Auto" oder im Sicherheitsblick.
         if ((voll || jetzt - autoGeklicktUm < 5000)
-                && ctx.clickIfVisibleIfKnown(screen, T_TO_BATTLE, WO + ": Automodus starten (To battle!)")) {
+                && ctx.clickIfVisibleIfKnown(screen, T_TO_BATTLE, WO + Sprache.t(": start auto mode (To battle!)", ": Automodus starten (To battle!)"))) {
             blind = 0;
             reiheGeprueft = false;
             nachziehVersuche = 0;
             reserveSchiebungen = 0;
             reserveErlaubt = gesperrtGesehen = false;   // naechste Aufstellung: wieder erst das Team
             grenzen.kampfZeichen(jetzt);
-            runs.progress("Gem Bay: Automodus");
+            runs.progress(Sprache.t("Gem Bay: auto mode", "Gem Bay: Automodus"));
             ctx.sleepUntilChanged(600);
             return Outcome.ACTED;
         }
@@ -606,7 +607,7 @@ public final class GemBayMode implements GameMode {
             grenzen.werbungVorbei();
             grenzen.kampfZeichen(jetzt);
             grenzen.fortschritt();
-            runs.progress("Gem Bay: in der Bucht");
+            runs.progress(Sprache.t("Gem Bay: in the bay", "Gem Bay: in der Bucht"));
             Outcome aus = bucht(screen, ctx, jetzt);
             if (vict.isPresent()) siegeLesen(vict.get(), ctx, jetzt);
             return aus;
@@ -626,7 +627,7 @@ public final class GemBayMode implements GameMode {
                 // NIE zweimal "Yes" (Autor, 06.10.): steht das Fenster nach 3 s noch, ist der Klick
                 // nicht angekommen -- erst dann noch einmal.
                 if (jetzt - jaGeklicktUm < GemBayGrenzen.EINZELKLICK_SPERRE_MS) return warten(ctx);
-                ctx.klick(ja.get(), WO + ": Warnung bestaetigen (Yes, Text geprueft)");
+                ctx.klick(ja.get(), WO + Sprache.t(": confirm the warning (Yes, text checked)", ": Warnung bestaetigen (Yes, Text geprueft)"));
                 // Die Sperre zaehlt ab dem KLICK, nicht ab Schrittanfang (Pruefung 06.10.): die
                 // Texterkennung davor (~0,7 s) frass sonst einen Teil der 3 s.
                 jaGeklicktUm = System.currentTimeMillis();
@@ -636,8 +637,8 @@ public final class GemBayMode implements GameMode {
                 return Outcome.ACTED;
             }
             return fremdesJa(screen, ctx, jetzt, text,
-                    erwartet ? "der Text ist nicht die erwartete Warnung (oder es steht ein Preis darin)"
-                            : "es kam nicht direkt nach \"Confirm\" und nicht in der Reise");
+                    erwartet ? Sprache.t("the text is not the expected warning (or it contains a price)", "der Text ist nicht die erwartete Warnung (oder es steht ein Preis darin)")
+                            : Sprache.t("it did not come right after \"Confirm\" and not during the journey", "es kam nicht direkt nach \"Confirm\" und nicht in der Reise"));
         }
 
         // Im Kampftakt endet der schnelle Schritt hier: Weltkarte, Burg und Stoerfenster gibt es
@@ -654,16 +655,16 @@ public final class GemBayMode implements GameMode {
             if (squadSeit == 0) squadSeit = System.currentTimeMillis();
             // Deploy-Knopf nicht zu sehen (grau, schon aufgestellt): nach 2,5 s trotzdem bestaetigen.
             if (!deployGedrueckt && System.currentTimeMillis() - squadSeit > 2500 && !ctx.visibleIfKnown(screen, T_DEPLOY)) {
-                Log.info(WO, "\"Deploy the best ones\" ist nicht zu sehen -- es wird so bestaetigt.");
+                Log.info(WO, Sprache.t("\"Deploy the best ones\" is not visible -- confirming as it is.", "\"Deploy the best ones\" ist nicht zu sehen -- es wird so bestaetigt."));
                 deployGedrueckt = true;
             }
             if (!deployGedrueckt && ctx.clickIfVisibleIfKnown(screen, T_DEPLOY,
-                    WO + ": Beste Einheiten (Deploy the best ones)")) {
+                    WO + Sprache.t(": best units (Deploy the best ones)", ": Beste Einheiten (Deploy the best ones)"))) {
                 deployGedrueckt = true;
                 ctx.sleepUntilChanged(600);
                 return confirmVoraus(ctx);
             }
-            if (deployGedrueckt && ctx.clickIfVisibleIfKnown(screen, T_CONFIRM, WO + ": Aufstellung bestaetigen (Confirm)")) {
+            if (deployGedrueckt && ctx.clickIfVisibleIfKnown(screen, T_CONFIRM, WO + Sprache.t(": confirm the squad (Confirm)", ": Aufstellung bestaetigen (Confirm)"))) {
                 return nachConfirm(ctx);
             }
             return kurzWarten(ctx);
@@ -674,7 +675,7 @@ public final class GemBayMode implements GameMode {
             blind = 0;
             grenzen.fortschritt();
             grenzen.kampfVorbei();
-            runs.progress("Gem Bay: Fenster Start journey");
+            runs.progress(Sprache.t("Gem Bay: Start journey window", "Gem Bay: Fenster Start journey"));
             return fenster(screen, ctx, jetzt);
         }
 
@@ -697,16 +698,16 @@ public final class GemBayMode implements GameMode {
                 }
                 Optional<Matcher.Hit> schild = ctx.find(screen, T_KARTE);
                 if (schild.isEmpty()) return kurzWarten(ctx);
-                String klickText = " (Klick " + grenzen.kartenKlicks() + " von " + GemBayGrenzen.MAX_KARTEN_KLICKS + " ohne Fortschritt)";
+                String klickText = Sprache.t(" (click ", " (Klick ") + grenzen.kartenKlicks() + Sprache.t(" of ", " von ") + GemBayGrenzen.MAX_KARTEN_KLICKS + Sprache.t(" without progress)", " ohne Fortschritt)");
                 // Live-Test 17.10. (Autor): Laeuft eine Reise, steht das Schild hoeher, darunter "Victories 13/15" -- ein
                 // Klick auf das Wort oeffnete nichts (12:26 und 13:28, je 4 Klicks). Darum jeder zweite Klick auf das
                 // Kaestchen darunter (Autors roter Kreis: Schild, Kaestchen und Schiff).
                 if (grenzen.kartenKlicks() % 2 == 0) {
                     int x = schild.get().centerX(), y = schild.get().centerY() + px(ctx, 55);
-                    Log.action(WO, "Gem Bay auf der Weltkarte oeffnen -- Kaestchen unter dem Schild bei " + x + "," + y + klickText);
+                    Log.action(WO, Sprache.t("Open Gem Bay on the world map -- box below the sign at ", "Gem Bay auf der Weltkarte oeffnen -- Kaestchen unter dem Schild bei ") + x + "," + y + klickText);
                     ctx.input().click(x, y, 4);
                 } else {
-                    ctx.klick(schild.get(), WO + ": Gem Bay auf der Weltkarte oeffnen" + klickText);
+                    ctx.klick(schild.get(), WO + Sprache.t(": open Gem Bay on the world map", ": Gem Bay auf der Weltkarte oeffnen") + klickText);
                 }
                 // Live-Test 17.10.: nach "Verbindung neu aufbauen" lud die Bucht laenger als 1 s -- 4 Klicks in 4 s, dann
                 // Abbruch. Jetzt bis zu 5 s auf ein Gem-Bay-Bild warten, bevor wieder geklickt wird.
@@ -714,14 +715,14 @@ public final class GemBayMode implements GameMode {
                 return Outcome.ACTED;
             }
             if (++zuege > MAX_ZUEGE) {
-                abbrechen(ctx, "karte", "Gem Bay ist auf der Weltkarte nicht zu finden (Vorlage " + T_KARTE + "?).");
+                abbrechen(ctx, "karte", Sprache.t("Gem Bay cannot be found on the world map (template ", "Gem Bay ist auf der Weltkarte nicht zu finden (Vorlage ") + T_KARTE + "?).");
                 return Outcome.ACTED;
             }
             int y = ctx.height() / 2;
             int links = (int) (ctx.width() * 0.25), rechts = (int) (ctx.width() * 0.75);
             boolean nachLinks = zuege <= 3;   // Gem Bay liegt unten rechts: erst das Bild nach links ziehen
-            Log.action("Karte", "Weltkarte nach " + (nachLinks ? "links" : "rechts") + " ziehen, um Gem Bay "
-                    + "zu finden (Zug " + zuege + " von " + MAX_ZUEGE + ").");
+            Log.action("Karte", Sprache.t("Swipe the world map ", "Weltkarte nach ") + (nachLinks ? Sprache.t("left", "links") : Sprache.t("right", "rechts")) + Sprache.t(" to find Gem Bay ", " ziehen, um Gem Bay ")
+                    + Sprache.t("(swipe ", "zu finden (Zug ") + zuege + Sprache.t(" of ", " von ") + MAX_ZUEGE + ").");
             if (nachLinks) ctx.input().drag(rechts, y, links, y);
             else ctx.input().drag(links, y, rechts, y);
             ctx.sleepUntilChanged(500);
@@ -748,9 +749,9 @@ public final class GemBayMode implements GameMode {
                         foto(ctx, "nahrung");
                     }
                     if (dauer > GemBayGrenzen.NAHRUNG_LESEN_MAX_MS && leseVersuche >= 3) {
-                        abbrechen(ctx, nahrungFotoGemacht ? null : "nahrung", "Die Nahrung in der Burg ist seit "
-                                + dauer / 1000 + " s nicht lesbar (" + leseVersuche + " Versuche) -- Gem Bay wird "
-                                + "ausgelassen (ohne bekannte Nahrung keine Reise).");
+                        abbrechen(ctx, nahrungFotoGemacht ? null : "nahrung", Sprache.t("The food in the castle has not been readable for ", "Die Nahrung in der Burg ist seit ")
+                                + dauer / 1000 + Sprache.t(" s (", " s nicht lesbar (") + leseVersuche + Sprache.t(" tries) -- Gem Bay is ", " Versuche) -- Gem Bay wird ")
+                                + Sprache.t("skipped (no journey without known food).", "ausgelassen (ohne bekannte Nahrung keine Reise)."));
                     } else {
                         ctx.sleep(tempo.ms(400));
                     }
@@ -758,22 +759,22 @@ public final class GemBayMode implements GameMode {
                 }
                 nahrungLesenSeit = 0;
                 nahrung = n.getAsLong();
-                Log.info(WO, "Nahrung in der Burg: " + zahl(nahrung)
-                        + (preis > 0 ? ", die Reise kostet " + zahl(preis) : "") + ".");
+                Log.info(WO, Sprache.t("Food in the castle: ", "Nahrung in der Burg: ") + zahl(nahrung)
+                        + (preis > 0 ? Sprache.t(", the journey costs ", ", die Reise kostet ") + zahl(preis) : "") + ".");
             }
             if (kistenNoetig()) {
                 if (kistenVersucht) {
-                    beenden("Die Nahrung reicht auch nach den Kisten nicht (" + zahl(nahrung) + " von "
-                            + zahl(preis) + ") -- Gem Bay ist fuer dieses Zeitfenster fertig.");
+                    beenden(Sprache.t("Not enough food even after the chests (", "Die Nahrung reicht auch nach den Kisten nicht (") + zahl(nahrung) + Sprache.t(" of ", " von ")
+                            + zahl(preis) + Sprache.t(") -- Gem Bay is done for this time window.", ") -- Gem Bay ist fuer dieses Zeitfenster fertig."));
                     return Outcome.ACTED;
                 }
                 if (!kisten.einsatzbereit(ctx)) {
-                    beenden("Die Nahrung reicht nicht, und fuer die Nahrungskisten fehlen Vorlagen -- "
-                            + "Gem Bay ist fuer dieses Zeitfenster fertig.");
+                    beenden(Sprache.t("Not enough food, and templates for the food chests are missing -- ", "Die Nahrung reicht nicht, und fuer die Nahrungskisten fehlen Vorlagen -- ")
+                            + Sprache.t("Gem Bay is done for this time window.", "Gem Bay ist fuer dieses Zeitfenster fertig."));
                     return Outcome.ACTED;
                 }
-                Log.info(WO, "Die Nahrung reicht nicht fuer die Reise (" + zahl(nahrung) + " von " + zahl(preis)
-                        + ") -- erst Nahrungskisten (Tasche, sonst Clan-Laden).");
+                Log.info(WO, Sprache.t("Not enough food for the journey (", "Die Nahrung reicht nicht fuer die Reise (") + zahl(nahrung) + Sprache.t(" of ", " von ") + zahl(preis)
+                        + Sprache.t(") -- food chests first (bag, otherwise clan store).", ") -- erst Nahrungskisten (Tasche, sonst Clan-Laden)."));
                 // Nur die Tasche (Autor, 06.10.: "Er soll bitte nur Kisten aus der Tasche nehmen. Der
                 // Clan-Laden ist ausschliesslich fuer den Clan-Krieg gedacht"), keine Werbevideos.
                 long ziel = preis;
@@ -783,7 +784,7 @@ public final class GemBayMode implements GameMode {
                     kistenTest = false;
                     OptionalLong echt = Nahrungskisten.nahrungLesen(ctx);
                     ziel = Math.max(preis, echt.orElse(preis) + 1);
-                    Log.info(WO, "Kisten-Test: Ziel " + zahl(ziel) + " Nahrung, damit mindestens eine Kiste aufgeht.");
+                    Log.info(WO, Sprache.t("Chest test: goal ", "Kisten-Test: Ziel ") + zahl(ziel) + Sprache.t(" food, so that at least one chest opens.", " Nahrung, damit mindestens eine Kiste aufgeht."));
                 }
                 // Autor, 08.10.: "am besten so viele Nahrungskisten, dass mein Lager fast maxed out ist"
                 // -- also bis nahe ans Lager (1,5 Mio) auffuellen, mindestens aber den Reisepreis.
@@ -798,8 +799,8 @@ public final class GemBayMode implements GameMode {
                 abbrechen(ctx, "karte", ZU_VIELE_KARTENKLICKS);
                 return Outcome.ACTED;   // naechster Schritt: Heimweg (schon in der Burg -> fertig)
             }
-            if (ctx.clickIfVisibleIfKnown(screen, T_MAP, WO + ": Weltkarte oeffnen")
-                    || ctx.clickIfVisibleIfKnown(screen, T_MAP_ALT, WO + ": Weltkarte oeffnen")) {
+            if (ctx.clickIfVisibleIfKnown(screen, T_MAP, WO + Sprache.t(": open the world map", ": Weltkarte oeffnen"))
+                    || ctx.clickIfVisibleIfKnown(screen, T_MAP_ALT, WO + Sprache.t(": open the world map", ": Weltkarte oeffnen"))) {
                 zuege = 0;
                 ctx.sleepUntilChanged(1500);
                 return Outcome.ACTED;
@@ -822,7 +823,7 @@ public final class GemBayMode implements GameMode {
         blind = 0;
         grenzen.werbungVorbei();
         grenzen.kampfZeichen(jetzt);
-        runs.progress("Gem Bay: Kampf laeuft");
+        runs.progress(Sprache.t("Gem Bay: fight running", "Gem Bay: Kampf laeuft"));
         return true;
     }
 
@@ -850,15 +851,15 @@ public final class GemBayMode implements GameMode {
         if (n < 0) {
             if (!siegeFehlenGemeldet) {
                 siegeFehlenGemeldet = true;
-                Log.info(WO, "Die Siege (\"Victories x/15\") sind (noch) nicht lesbar (\"" + text.trim() + "\") -- "
-                        + "solange gilt die Zeitgrenze von " + GemBayGrenzen.BESUCH_MAX_MS / 60_000 + " Minuten ohne Verlaengerung.");
+                Log.info(WO, Sprache.t("The wins (\"Victories x/15\") are not readable (yet) (\"", "Die Siege (\"Victories x/15\") sind (noch) nicht lesbar (\"") + text.trim() + "\") -- "
+                        + Sprache.t("until then the time limit of ", "solange gilt die Zeitgrenze von ") + GemBayGrenzen.BESUCH_MAX_MS / 60_000 + Sprache.t(" minutes applies without extension.", " Minuten ohne Verlaengerung."));
             }
             return;
         }
         grenzen.siegeGelesen(n, jetzt);
         if (!siegeGemeldet) {
             siegeGemeldet = true;
-            Log.info(WO, "Siege gelesen: " + n + "/15.");
+            Log.info(WO, Sprache.t("Wins read: ", "Siege gelesen: ") + n + "/15.");
         } else {
             Log.debug(WO, "Siege: " + n + "/15.");
         }
@@ -878,10 +879,10 @@ public final class GemBayMode implements GameMode {
             // Runden hintereinander (~10 s mit Fotozyklus) melden -- ein Kampf dauert 5-7 s.
             if (jetzt - kampfGemeldetUm > 30_000 && (blind > 5 || !kampfTaktErlaubt(jetzt))) {
                 kampfGemeldetUm = jetzt;
-                Log.info(WO, "Bildschirm nicht erkannt -- vermutlich laeuft "
-                        + (grenzen.videoHaengtNoch() ? "noch die Werbung (das Video kam nicht zurueck)"
-                        : grenzen.videoMoeglich(jetzt) ? "noch das Video" : "ein Kampf")
-                        + ". Kein rotes X, es wird gewartet.");
+                Log.info(WO, Sprache.t("Screen not recognised -- probably still running: ", "Bildschirm nicht erkannt -- vermutlich laeuft ")
+                        + (grenzen.videoHaengtNoch() ? Sprache.t("the ad (the video did not come back)", "noch die Werbung (das Video kam nicht zurueck)")
+                        : grenzen.videoMoeglich(jetzt) ? Sprache.t("the video", "noch das Video") : Sprache.t("a fight", "ein Kampf"))
+                        + Sprache.t(". No red X, waiting.", ". Kein rotes X, es wird gewartet."));
                 if (blind > MAX_BLIND / 2) foto(ctx, grenzen.videoMoeglich(jetzt) ? "video" : "kampf");
             }
             // Im Kampf: statt 300 ms blind zu warten, den Kasten um "Battle begins" im Schnelltakt
@@ -891,17 +892,17 @@ public final class GemBayMode implements GameMode {
         }
         if (blind <= MAX_BLIND) return warten(ctx);
         if (blindX < MAX_BLIND_X && ctx.clickIfVisibleIfKnown(screen, T_X,
-                WO + ": Fenster schliessen (rotes X, es laeuft sicher kein Kampf)")) {
+                WO + Sprache.t(": close the window (red X, surely no fight running)", ": Fenster schliessen (rotes X, es laeuft sicher kein Kampf)"))) {
             blindX++;
             blind = MAX_BLIND / 2;
             ctx.sleepUntilChanged(1200);
             return Outcome.ACTED;
         }
         if (!fertig) {
-            abbrechen(ctx, "unbekannt", "Bildschirm nicht erkannt -- der Besuch wird beendet, zurueck in die Burg.");
+            abbrechen(ctx, "unbekannt", Sprache.t("Screen not recognised -- the visit ends, back to the castle.", "Bildschirm nicht erkannt -- der Besuch wird beendet, zurueck in die Burg."));
             return Outcome.ACTED;
         }
-        warnung("Bildschirm nicht erkannt, auch auf dem Heimweg -- Gem Bay endet hier, es geht weiter.");
+        warnung(Sprache.t("Screen not recognised, also on the way home -- Gem Bay ends here, carrying on.", "Bildschirm nicht erkannt, auch auf dem Heimweg -- Gem Bay endet hier, es geht weiter."));
         return Outcome.FINISHED;
     }
 
@@ -912,15 +913,15 @@ public final class GemBayMode implements GameMode {
      */
     private Outcome heimweg(Mat screen, BotContext ctx, RunTracker runs, long jetzt) {
         if (inBurg(screen, ctx)) {
-            Log.info(WO, "Zurueck in der Burg -- der Besuch in der Edelsteinbucht ist zu Ende"
-                    + (reisen > 0 ? " (" + reisen + (reisen == 1 ? " Reise" : " Reisen") + " geschafft)" : "") + ".");
+            Log.info(WO, Sprache.t("Back in the castle -- the visit to the Gem Bay is over", "Zurueck in der Burg -- der Besuch in der Edelsteinbucht ist zu Ende")
+                    + (reisen > 0 ? " (" + reisen + (reisen == 1 ? Sprache.t(" journey", " Reise") : Sprache.t(" journeys", " Reisen")) + " geschafft)" : "") + ".");
             runs.completeRun();
             return Outcome.FINISHED;
         }
         Optional<Matcher.Hit> ja = jaKnopf(screen, ctx);
         if (ja.isPresent()) {
             blind = 0;
-            return fremdesJa(screen, ctx, jetzt, jaText(ctx, ja.get()), "der Besuch ist zu Ende");
+            return fremdesJa(screen, ctx, jetzt, jaText(ctx, ja.get()), Sprache.t("the visit is over", "der Besuch ist zu Ende"));
         }
         if (victories(screen, ctx).isPresent()) {
             blind = 0;
@@ -951,7 +952,7 @@ public final class GemBayMode implements GameMode {
      * (Pruefung 05.10.). So hat der Heimweg seine vollen 5 Minuten.
      */
     private void heimwegMelden() {
-        if (lauf != null) lauf.progress("Gem Bay: Heimweg");
+        if (lauf != null) lauf.progress(Sprache.t("Gem Bay: way home", "Gem Bay: Heimweg"));
     }
 
     /** Die im Besuch gelesene Reset-Zeit jetzt vermerken (nur wenn das Zeitfenster erledigt ist). */
@@ -987,12 +988,12 @@ public final class GemBayMode implements GameMode {
         int n = GemBayplan.fehlschlag();
         if (GemBayplan.resetJetztMerken(false, n)) resetVermerken();
         if (n == 0) {
-            Log.info(WO, "Abgebrochen ausserhalb eines Zeitfensters (von Hand gestartet) -- nichts vermerkt.");
+            Log.info(WO, Sprache.t("Cancelled outside a time window (started by hand) -- nothing noted.", "Abgebrochen ausserhalb eines Zeitfensters (von Hand gestartet) -- nichts vermerkt."));
         } else if (n >= 2) {
-            Log.info(WO, "Das war der " + n + ". Fehlversuch in diesem Zeitfenster -- erst im naechsten Fenster wieder.");
+            Log.info(WO, Sprache.t("That was failed attempt no. ", "Das war der ") + n + Sprache.t(" in this time window -- only again in the next window.", ". Fehlversuch in diesem Zeitfenster -- erst im naechsten Fenster wieder."));
         } else {
-            Log.info(WO, "Erster Fehlversuch in diesem Zeitfenster -- in 20 Minuten noch ein Versuch"
-                    + (resetUm != null ? " (die Reset-Zeit wird erst danach vermerkt)" : "") + ".");
+            Log.info(WO, Sprache.t("First failed attempt in this time window -- one more try in 20 minutes", "Erster Fehlversuch in diesem Zeitfenster -- in 20 Minuten noch ein Versuch")
+                    + (resetUm != null ? Sprache.t(" (the reset time is only noted after that)", " (die Reset-Zeit wird erst danach vermerkt)") : "") + ".");
         }
     }
 
@@ -1020,8 +1021,8 @@ public final class GemBayMode implements GameMode {
         if (!resetGelesen) resetGelesen = resetLesen(screen, ctx);
         // Diamanten statt Nahrung: heute schon gespielt. NIE starten.
         if (ctx.visibleIfKnown(screen, T_DIAMANT) && !ctx.visibleIfKnown(screen, T_APFEL)) {
-            beenden("Der Preis steht in Diamanten -- fuer heute sind alle Nahrungs-Reisen gespielt"
-                    + (reisen > 0 ? " (" + reisen + " in diesem Durchgang)" : "") + ".");
+            beenden(Sprache.t("The price is in diamonds -- all food journeys for today are played", "Der Preis steht in Diamanten -- fuer heute sind alle Nahrungs-Reisen gespielt")
+                    + (reisen > 0 ? " (" + reisen + Sprache.t(" in this round)", " in diesem Durchgang)") : "") + ".");
             return schliessen(screen, ctx);
         }
         if (preis < 0) {
@@ -1032,15 +1033,15 @@ public final class GemBayMode implements GameMode {
                 // Der erste Run am Tag ist kostenlos (Autor, 29.09.): "Free" statt Apfel und Zahl.
                 if (art == GemBayGrenzen.PreisArt.FREI && !ctx.visibleIfKnown(screen, T_APFEL)) {
                     p = OptionalLong.of(0);
-                    Log.info(WO, "Die Reise ist kostenlos (\"Free\" auf \"Start journey\").");
+                    Log.info(WO, Sprache.t("The journey is free (\"Free\" on \"Start journey\").", "Die Reise ist kostenlos (\"Free\" auf \"Start journey\")."));
                 } else if (art == GemBayGrenzen.PreisArt.ANDERER_PREIS && preisVersuche >= 1) {
                     // gb_preis_diamant fehlt noch: eine Zahl OHNE Apfel ist ein Preis in einer anderen
                     // Waehrung -- nach Autor (29.09.) Diamanten, also fuer heute alles gespielt.
                     // Es wird NICHTS angetippt, nur das Fenster geschlossen.
                     foto(ctx, "preis");
-                    beenden("Unter \"Start journey\" steht ein Preis ohne Apfel (wohl Diamanten) -- fuer heute "
-                            + "sind alle Nahrungs-Reisen gespielt" + (reisen > 0 ? " (" + reisen + " in diesem Durchgang)" : "")
-                            + ". Es wird nichts angetippt.");
+                    beenden(Sprache.t("Below \"Start journey\" there is a price without an apple (probably diamonds) -- ", "Unter \"Start journey\" steht ein Preis ohne Apfel (wohl Diamanten) -- fuer heute ")
+                            + Sprache.t("all food journeys for today are played", "sind alle Nahrungs-Reisen gespielt") + (reisen > 0 ? " (" + reisen + Sprache.t(" in this round)", " in diesem Durchgang)") : "")
+                            + Sprache.t(". Nothing is tapped.", ". Es wird nichts angetippt."));
                     return schliessen(screen, ctx);
                 }
             }
@@ -1049,26 +1050,33 @@ public final class GemBayMode implements GameMode {
                     ctx.sleep(tempo.ms(300));
                     return Outcome.WAITING;
                 }
-                abbrechen(ctx, "preis", "Der Preis unter \"Start journey\" ist nicht lesbar -- keine Reise ohne "
-                        + "bekannten Preis.");
+                abbrechen(ctx, "preis", Sprache.t("The price below \"Start journey\" is not readable -- no journey without ", "Der Preis unter \"Start journey\" ist nicht lesbar -- keine Reise ohne ")
+                        + Sprache.t("a known price.", "bekannten Preis."));
                 return schliessen(screen, ctx);
             }
             preis = p.getAsLong();
-            if (preis > 0) Log.info(WO, "Die Reise kostet " + zahl(preis) + " Nahrung.");
+            if (preis > 0 && !GemBayGrenzen.reiseErlaubt(istAutor(), GemBayGrenzen.mehrAn(), GemBayGrenzen.PreisArt.NAHRUNG)) {
+                // Freunde (Autor, 20.11.): nur kostenlose Reisen; Preis in Nahrung = fuer heute fertig, keine Kisten.
+                beenden(Sprache.t("The journey costs food -- all free journeys for today are played", "Die Reise kostet Nahrung -- fuer heute sind alle kostenlosen Reisen gespielt")
+                        + (reisen > 0 ? " (" + reisen + Sprache.t(" in this round)", " in diesem Durchgang)") : "")
+                        + Sprache.t(". To play more: gembay-mehr.txt with \"an\".", ". Mehr spielen: gembay-mehr.txt mit \"an\"."));
+                return schliessen(screen, ctx);
+            }
+            if (preis > 0) Log.info(WO, Sprache.t("The journey costs ", "Die Reise kostet ") + zahl(preis) + Sprache.t(" food.", " Nahrung."));
             // Kisten-Test (Autor, 06.10.: "testen, ob der Bot von der Edelsteinbucht in meine Tasche
             // zurueckfindet, eine Nahrungskiste oeffnen kann und dann wieder in die Edelsteinbucht
             // geht"): liegt gembay-kisten-test.txt im Bot-Ordner, gilt die Nahrung bei der naechsten
             // bezahlten Reise einmal als zu knapp. Die Datei wird dabei geloescht (einmalig).
             if (preis > 0 && nahrung >= 0 && java.nio.file.Files.exists(KISTEN_TEST)) {
                 try { java.nio.file.Files.deleteIfExists(KISTEN_TEST); } catch (java.io.IOException ignored) { }
-                Log.info(WO, "Kisten-Test (gembay-kisten-test.txt): die Nahrung gilt einmal als zu knapp -- "
-                        + "Burg, Tasche, Nahrungskiste, zurueck in die Bucht.");
+                Log.info(WO, Sprache.t("Chest test (gembay-kisten-test.txt): the food counts as too low once -- ", "Kisten-Test (gembay-kisten-test.txt): die Nahrung gilt einmal als zu knapp -- ")
+                        + Sprache.t("castle, bag, food chest, back to the bay.", "Burg, Tasche, Nahrungskiste, zurueck in die Bucht."));
                 nahrung = 0;
                 kistenTest = true;
             }
         }
         if (nahrung < 0) {
-            Log.info(WO, "Nahrung noch nicht abgelesen -- erst in die Burg.");
+            Log.info(WO, Sprache.t("Food not read yet -- to the castle first.", "Nahrung noch nicht abgelesen -- erst in die Burg."));
             return schliessen(screen, ctx);
         }
         if (kistenNoetig()) return schliessen(screen, ctx);
@@ -1077,22 +1085,22 @@ public final class GemBayMode implements GameMode {
         // ist -- nie Diamanten.
         boolean sicher = preis > 0 ? apfelUnterStart(screen, ctx).isPresent() : kostenlos(screen, ctx);
         if (!sicher) {
-            abbrechen(ctx, "preis", "Weder Apfel-Preis noch \"Free\" sicher zu sehen -- keine Reise (nie Diamanten).");
+            abbrechen(ctx, "preis", Sprache.t("Neither an apple price nor \"Free\" clearly visible -- no journey (never diamonds).", "Weder Apfel-Preis noch \"Free\" sicher zu sehen -- keine Reise (nie Diamanten)."));
             return schliessen(screen, ctx);
         }
         // Pruefung 05.10.: nie eine bezahlte Reise kurz vor der Zeitgrenze starten (sie waere gleich
         // wieder abgebrochen). Lieber sauber heim; der Fehlversuch bringt in 20 Minuten einen neuen
         // Besuch mit frischen 15 Minuten.
         if (!grenzen.startErlaubt(jetzt)) {
-            abbrechen(ctx, null, "Vom Besuch sind nur noch " + Math.max(0, (GemBayGrenzen.BESUCH_MAX_MS
-                    - grenzen.besuchMs(jetzt)) / 60_000) + " Minuten uebrig (fuer eine neue Reise mindestens "
-                    + GemBayGrenzen.START_REST_MS / 60_000 + ") -- kein \"Start journey\", sauber zurueck in die Burg.");
+            abbrechen(ctx, null, Sprache.t("Only ", "Vom Besuch sind nur noch ") + Math.max(0, (GemBayGrenzen.BESUCH_MAX_MS
+                    - grenzen.besuchMs(jetzt)) / 60_000) + Sprache.t(" minutes of the visit left (a new journey needs at least ", " Minuten uebrig (fuer eine neue Reise mindestens ")
+                    + GemBayGrenzen.START_REST_MS / 60_000 + Sprache.t(") -- no \"Start journey\", cleanly back to the castle.", ") -- kein \"Start journey\", sauber zurueck in die Burg."));
             return schliessen(screen, ctx);
         }
         deployGedrueckt = false;
         squadSeit = 0;
-        if (!ctx.clickIfVisibleIfKnown(screen, T_START, WO + ": Reise starten (Start journey, "
-                + (preis == 0 ? "kostenlos" : zahl(preis) + " Nahrung") + ")")) {
+        if (!ctx.clickIfVisibleIfKnown(screen, T_START, WO + Sprache.t(": start the journey (Start journey, ", ": Reise starten (Start journey, ")
+                + (preis == 0 ? Sprache.t("free", "kostenlos") : zahl(preis) + Sprache.t(" food", " Nahrung")) + ")")) {
             return kurzWarten(ctx);
         }
         // Die Sperre zaehlt ab dem KLICK, nicht ab Schrittanfang (Pruefung 06.10.): Reset-Zeit und
@@ -1116,7 +1124,7 @@ public final class GemBayMode implements GameMode {
     private Outcome aufstellungVoraus(BotContext ctx) {
         Optional<Matcher.Hit> k = ctx.warteAufKnopf(VORAUS_MS, Matcher.DEFAULT_THRESHOLD, T_DEPLOY, T_CONFIRM);
         if (k.isPresent() && T_DEPLOY.equals(k.get().name())) {
-            ctx.klick(k.get(), WO + ": Beste Einheiten (Deploy the best ones, Vorausklick)");
+            ctx.klick(k.get(), WO + Sprache.t(": best units (Deploy the best ones, click ahead)", ": Beste Einheiten (Deploy the best ones, Vorausklick)"));
             deployGedrueckt = true;
             if (squadSeit == 0) squadSeit = System.currentTimeMillis();
             // 08.10. (Tempo-Analyse): kein sleepUntilChanged(600) mehr -- in 2 von 4 Faellen lief es in
@@ -1131,7 +1139,7 @@ public final class GemBayMode implements GameMode {
     private Outcome confirmVoraus(BotContext ctx) {
         Optional<Matcher.Hit> c = ctx.warteAufKnopf(VORAUS_MS, Matcher.DEFAULT_THRESHOLD, T_CONFIRM);
         if (c.isEmpty() || !deployGedrueckt) return Outcome.ACTED;
-        ctx.klick(c.get(), WO + ": Aufstellung bestaetigen (Confirm, Vorausklick)");
+        ctx.klick(c.get(), WO + Sprache.t(": confirm the squad (Confirm, click ahead)", ": Aufstellung bestaetigen (Confirm, Vorausklick)"));
         return nachConfirm(ctx);
     }
 
@@ -1141,7 +1149,7 @@ public final class GemBayMode implements GameMode {
      */
     private Outcome nachConfirm(BotContext ctx) {
         confirmUm = System.currentTimeMillis();
-        if (lauf != null) lauf.progress("Gem Bay: Aufstellung bestaetigt");
+        if (lauf != null) lauf.progress(Sprache.t("Gem Bay: squad confirmed", "Gem Bay: Aufstellung bestaetigt"));
         ctx.sleepUntilChanged(600);
         ctx.warteAufKnopf(VORAUS_MS, Matcher.DEFAULT_THRESHOLD, buchtNamen(ctx, T_YES));
         return Outcome.ACTED;
@@ -1226,8 +1234,8 @@ public final class GemBayMode implements GameMode {
         if (r.isEmpty() || bild == null) {
             if (!resetFehltGemeldet) {
                 resetFehltGemeldet = true;
-                Log.info(WO, "Die Anzeige \"Journey cost resets in\" ist (noch) nicht zu sehen (Vorlage " + T_RESET
-                        + ") -- die Reset-Zeit wird beim naechsten Blick gelesen.");
+                Log.info(WO, Sprache.t("The \"Journey cost resets in\" display is not visible (yet) (template ", "Die Anzeige \"Journey cost resets in\" ist (noch) nicht zu sehen (Vorlage ") + T_RESET
+                        + Sprache.t(") -- the reset time is read at the next look.", ") -- die Reset-Zeit wird beim naechsten Blick gelesen."));
             }
             return false;
         }
@@ -1269,15 +1277,15 @@ public final class GemBayMode implements GameMode {
         }
         if (d == null) {
             if (++resetVersuche < 3) return false;   // beim naechsten Blick ins Fenster noch einmal
-            Log.info(WO, "Die Zeit bis zum Reset war nach " + resetVersuche + " Versuchen nicht lesbar (\"" + text + "\").");
+            Log.info(WO, Sprache.t("The time until the reset was not readable after ", "Die Zeit bis zum Reset war nach ") + resetVersuche + Sprache.t(" tries (\"", " Versuchen nicht lesbar (\"") + text + "\").");
             foto(ctx, "fenster");
             return true;   // nicht bei jedem Blick neu lesen
         }
         java.time.LocalDateTime um = de.hustlebot.core.Zeitzone.jetzt().plus(d);
         resetUm = um;
-        Log.info(WO, "Reisekosten setzen sich zurueck in " + text.trim() + " -- also um "
-                + um.toLocalTime().withSecond(0).withNano(0) + (um.toLocalDate().isAfter(de.hustlebot.core.Zeitzone.heute()) ? " (morgen)" : "")
-                + ". Vermerkt wird das, wenn der Besuch das Zeitfenster erledigt.");
+        Log.info(WO, Sprache.t("Journey costs reset in ", "Reisekosten setzen sich zurueck in ") + text.trim() + Sprache.t(" -- so at ", " -- also um ")
+                + um.toLocalTime().withSecond(0).withNano(0) + (um.toLocalDate().isAfter(de.hustlebot.core.Zeitzone.heute()) ? Sprache.t(" (tomorrow)", " (morgen)") : "")
+                + Sprache.t(". This is noted when the visit completes the time window.", ". Vermerkt wird das, wenn der Besuch das Zeitfenster erledigt."));
         return true;
     }
 
@@ -1354,13 +1362,13 @@ public final class GemBayMode implements GameMode {
         fremdesJaZuletzt = jetzt;
         if (jetzt - fremdesJaSeit < FREMDES_JA_MS) return warten(ctx);
         fremdesJaSeit = 0;
-        warnung("Ein Fenster mit \"Yes\" ist offen, aber " + warum + " -- es wird NICHT bestaetigt. "
+        warnung(Sprache.t("A window with \"Yes\" is open, but ", "Ein Fenster mit \"Yes\" ist offen, aber ") + warum + Sprache.t(" -- it is NOT confirmed. ", " -- es wird NICHT bestaetigt. ")
                 + "Text: \"" + text + "\"");
         foto(ctx, "yes");
-        boolean zu = ctx.clickIfVisibleIfKnown(screen, T_KAUF_NEIN, WO + ": Fenster ablehnen (No, nie Yes)")
-                || ctx.clickIfVisibleIfKnown(screen, T_X, WO + ": Fenster schliessen (rotes X, nie Yes)");
+        boolean zu = ctx.clickIfVisibleIfKnown(screen, T_KAUF_NEIN, WO + Sprache.t(": decline the window (No, never Yes)", ": Fenster ablehnen (No, nie Yes)"))
+                || ctx.clickIfVisibleIfKnown(screen, T_X, WO + Sprache.t(": close the window (red X, never Yes)", ": Fenster schliessen (rotes X, nie Yes)"));
         if (!fertig && ++fremdeJa >= 2) {
-            abbrechen(ctx, null, "Zweimal ein Fenster mit \"Yes\", das nicht passt -- der Besuch wird beendet.");
+            abbrechen(ctx, null, Sprache.t("Twice a window with \"Yes\" that does not fit -- the visit ends.", "Zweimal ein Fenster mit \"Yes\", das nicht passt -- der Besuch wird beendet."));
         }
         if (zu) {
             ctx.sleepUntilChanged(1200);
@@ -1404,24 +1412,24 @@ public final class GemBayMode implements GameMode {
                     nachziehVersuche++;
                     reiheGeprueft = false;
                     foto(ctx, "platz-frei");
-                    if (!ctx.clickIfVisibleIfKnown(screen, T_KAUF_NEIN, WO + ": Trupp unvollstaendig -- erst Reserve nachziehen (No)")) {
+                    if (!ctx.clickIfVisibleIfKnown(screen, T_KAUF_NEIN, WO + Sprache.t(": squad incomplete -- pull in the reserve first (No)", ": Trupp unvollstaendig -- erst Reserve nachziehen (No)"))) {
                         // "No" sitzt gespiegelt rechts neben "Yes" (Foto 10.10., 13:53).
                         int x = ctx.width() - ja.get().centerX(), y = ja.get().centerY();
-                        Log.action("Klick", WO + ": Trupp unvollstaendig -- erst Reserve nachziehen (No, gespiegelt zu Yes)  [" + x + "," + y + "]");
+                        Log.action("Klick", WO + Sprache.t(": squad incomplete -- pull in the reserve first (No, mirrored to Yes)  [", ": Trupp unvollstaendig -- erst Reserve nachziehen (No, gespiegelt zu Yes)  [") + x + "," + y + "]");
                         ctx.input().click(x, y, 2);
                     }
-                    Log.info(WO, "Trupp unvollstaendig -- erst die freien Plaetze aus der Reserve fuellen (Anlauf "
-                            + nachziehVersuche + " von 3).");
+                    Log.info(WO, Sprache.t("Squad incomplete -- first fill the free slots from the reserve (attempt ", "Trupp unvollstaendig -- erst die freien Plaetze aus der Reserve fuellen (Anlauf ")
+                            + nachziehVersuche + Sprache.t(" of 3).", " von 3)."));
                     ctx.sleepUntilChanged(700);
                     return Outcome.ACTED;
                 }
                 if (jetzt - jaGeklicktUm < GemBayGrenzen.EINZELKLICK_SPERRE_MS) return warten(ctx);   // NIE zweimal "Yes"
-                ctx.klick(ja.get(), WO + ": Trupp unvollstaendig -- trotzdem kaempfen (Yes, Text geprueft)");
+                ctx.klick(ja.get(), WO + Sprache.t(": squad incomplete -- fight anyway (Yes, text checked)", ": Trupp unvollstaendig -- trotzdem kaempfen (Yes, Text geprueft)"));
                 jaGeklicktUm = System.currentTimeMillis();   // ab dem Klick, nicht ab Schrittanfang (06.10.)
                 ctx.sleepUntilChanged(600);
                 return Outcome.ACTED;
             }
-            return fremdesJa(screen, ctx, jetzt, text, "der Text ist nicht die Trupp-Warnung (oder es steht ein Preis darin)");
+            return fremdesJa(screen, ctx, jetzt, text, Sprache.t("the text is not the squad warning (or it contains a price)", "der Text ist nicht die Trupp-Warnung (oder es steht ein Preis darin)"));
         }
         // Autor 17.10.: Nach dem Video dauert es, bis die Einheiten wieder leben ("Waiting for ad network to respond",
         // bis zu einer Minute und mehr). Bis dahin nichts druecken ausser kurz raus (rotes X) und wieder hinein.
@@ -1459,8 +1467,8 @@ public final class GemBayMode implements GameMode {
             boolean luecke = reiheWischer++ % 2 == 0;
             int y = r.centerY() - px(ctx, luecke ? 73 : 122);
             int von = r.centerX() + px(ctx, luecke ? 207 : 270), nach = r.centerX() + px(ctx, luecke ? -93 : 40);
-            Log.action(WO, "Aufstellung langsam nach links wischen (" + (luecke ? "zwischen zwei Einheiten" : "ueber den Abzeichen")
-                    + ") -- ist ein Platz frei geworden?");
+            Log.action(WO, Sprache.t("Swipe the squad slowly to the left (", "Aufstellung langsam nach links wischen (") + (luecke ? Sprache.t("between two units", "zwischen zwei Einheiten") : Sprache.t("over the badges", "ueber den Abzeichen"))
+                    + Sprache.t(") -- has a slot become free?", ") -- ist ein Platz frei geworden?"));
             ctx.input().dragLangsam(von, y, nach, y);
             ctx.sleepUntilChanged(700);
             return Outcome.ACTED;
@@ -1476,8 +1484,8 @@ public final class GemBayMode implements GameMode {
         if (frei.isEmpty() && nachziehVersuche > 0 && reiheGeprueft && reserve.isPresent()
                 && jetzt - nachziehGemeldetUm > 20_000) {
             nachziehGemeldetUm = jetzt;
-            warnung("Trupp unvollstaendig, aber kein freier Platz (+) in der Aufstellung erkannt -- Foto "
-                    + "platz-frei-nicht-erkannt. Es wird dann unvollstaendig gekaempft.");
+            warnung(Sprache.t("Squad incomplete, but no free slot (+) recognised in the squad -- photo ", "Trupp unvollstaendig, aber kein freier Platz (+) in der Aufstellung erkannt -- Foto ")
+                    + Sprache.t("platz-frei-nicht-erkannt. Then the fight goes ahead incomplete.", "platz-frei-nicht-erkannt. Es wird dann unvollstaendig gekaempft."));
             foto(ctx, "platz-frei-nicht-erkannt");
         }
         if (frei.isPresent() && reserve.isPresent()) {
@@ -1488,10 +1496,10 @@ public final class GemBayMode implements GameMode {
             if (!GemBayplan.watchBenutzt() && !lebtNoch(screen, ctx, reserve.get()) && toteInReserve(ctx, reserve.get())
                     && ctx.visibleIfKnown(screen, T_WATCH)) {
                 einheitenMerken(ctx, reserve.get());   // vor dem Klick: das Bild zeigt noch, wer gefallen ist
-                if (ctx.clickIfVisibleIfKnown(screen, T_WATCH, WO + ": Alle Einheiten wiederherstellen (Restore all units, Video)")) {
+                if (ctx.clickIfVisibleIfKnown(screen, T_WATCH, WO + Sprache.t(": restore all units (Restore all units, video)", ": Alle Einheiten wiederherstellen (Restore all units, Video)"))) {
                     videoStarten(jetzt);
-                    Log.info(WO, "Das Team ist gefallen -- zuerst das Video fuer \"Restore all units\". Waehrenddessen "
-                            + "wird nichts angeklickt; danach werden erst die Team-Einheiten hochgezogen.");
+                    Log.info(WO, Sprache.t("The team has fallen -- first the video for \"Restore all units\". Meanwhile ", "Das Team ist gefallen -- zuerst das Video fuer \"Restore all units\". Waehrenddessen ")
+                            + Sprache.t("nothing is clicked; afterwards the team units are pulled up first.", "wird nichts angeklickt; danach werden erst die Team-Einheiten hochgezogen."));
                     return Outcome.ACTED;
                 }
             }
@@ -1499,8 +1507,8 @@ public final class GemBayMode implements GameMode {
             if (einheit != null) {
                 reserveSchiebungen = 0;
                 gesperrtGesehen = false;
-                Log.action(WO, "Freien Platz fuellen: " + (einheit[2] == 1 ? "Team-Einheit" : einheit[2] == 2
-                        ? "Reserve-Einheit" : "Einheit") + " bei " + einheit[0] + "," + einheit[1] + " hineinziehen.");
+                Log.action(WO, Sprache.t("Fill a free slot: ", "Freien Platz fuellen: ") + (einheit[2] == 1 ? Sprache.t("team unit", "Team-Einheit") : einheit[2] == 2
+                        ? Sprache.t("reserve unit", "Reserve-Einheit") : Sprache.t("unit", "Einheit")) + Sprache.t(" at ", " bei ") + einheit[0] + "," + einheit[1] + Sprache.t(" drag in.", " hineinziehen."));
                 ctx.input().drag(einheit[0], einheit[1], frei.get().centerX(), frei.get().centerY());
                 ctx.sleepUntilChanged(900);
                 return Outcome.ACTED;
@@ -1516,8 +1524,8 @@ public final class GemBayMode implements GameMode {
                 int y = reserve.get().centerY() + px(ctx, 77);
                 int von = reserve.get().centerX() + px(ctx, wiePfeil ? -150 : 200);
                 int nach = reserve.get().centerX() + px(ctx, wiePfeil ? 200 : -150);
-                Log.action(WO, "Reserve weiterschieben (" + reserveSchiebungen + "/6, " + (wiePfeil ? "nach rechts" : "nach links")
-                        + ") -- weitere lebende Einheiten suchen.");
+                Log.action(WO, Sprache.t("Move the reserve on (", "Reserve weiterschieben (") + reserveSchiebungen + "/6, " + (wiePfeil ? Sprache.t("to the right", "nach rechts") : Sprache.t("to the left", "nach links"))
+                        + Sprache.t(") -- looking for more living units.", ") -- weitere lebende Einheiten suchen."));
                 ctx.input().dragLangsam(von, y, nach, y);
                 ctx.sleepUntilChanged(700);
                 return Outcome.ACTED;
@@ -1528,40 +1536,40 @@ public final class GemBayMode implements GameMode {
                 reserveErlaubt = true;
                 gesperrtGesehen = false;
                 reserveSchiebungen = 0;
-                Log.info(WO, "Keine Team-Einheit mehr am Leben -- jetzt kommen die Reserve-Einheiten in den Trupp.");
+                Log.info(WO, Sprache.t("No team unit alive any more -- now the reserve units go into the squad.", "Keine Team-Einheit mehr am Leben -- jetzt kommen die Reserve-Einheiten in den Trupp."));
                 return Outcome.ACTED;
             }
             // "Restore all units" geht nur einmal am Tag (Autor, 29.09.).
             if (!lebtNoch(screen, ctx, reserve.get()) && GemBayplan.watchBenutzt()) {
                 // Autor 17.10.: "Wenn du wieder verlierst, dann soll der Bot oben auf Claim reward druecken. Und einfach
                 // weitermachen mit den Edelsteinbuchten." Danach kommt "Journey over!" wie nach 15 Siegen.
-                if (obenClaims < 2 && ctx.clickIfVisibleIfKnown(screen, T_CLAIM_OBEN, WO + ": Reise beenden "
-                        + "(Claim reward oben) -- alle Einheiten gefallen, das Video ist schon benutzt")) {
+                if (obenClaims < 2 && ctx.clickIfVisibleIfKnown(screen, T_CLAIM_OBEN, WO + Sprache.t(": end the journey ", ": Reise beenden ")
+                        + Sprache.t("(Claim reward at the top) -- all units fell, the video is already used", "(Claim reward oben) -- alle Einheiten gefallen, das Video ist schon benutzt"))) {
                     obenClaims++;
-                    Log.info(WO, "Alle Einheiten sind gefallen, \"Restore all units\" ist schon benutzt -- die Reise wird "
-                            + "mit \"Claim reward\" beendet, danach geht es mit der naechsten Reise weiter.");
+                    Log.info(WO, Sprache.t("All units have fallen, \"Restore all units\" is already used -- the journey is ", "Alle Einheiten sind gefallen, \"Restore all units\" ist schon benutzt -- die Reise wird ")
+                            + Sprache.t("ended with \"Claim reward\", then the next journey follows.", "mit \"Claim reward\" beendet, danach geht es mit der naechsten Reise weiter."));
                     ctx.sleepUntilChanged(1200);
                     return Outcome.ACTED;
                 }
                 // raus ueber das rote X, in der Burg dann FINISHED; vermerkt, damit der Bot nicht
                 // nach 20 Minuten im selben Fenster wieder hineingeht
-                beenden("Alle Einheiten sind gefallen, und \"Restore all units\" ist heute schon benutzt. "
-                        + "Gem Bay wird fuer jetzt beendet (die Reise bleibt offen).");
+                beenden(Sprache.t("All units have fallen, and \"Restore all units\" is already used today. ", "Alle Einheiten sind gefallen, und \"Restore all units\" ist heute schon benutzt. ")
+                        + Sprache.t("Gem Bay ends for now (the journey stays open).", "Gem Bay wird fuer jetzt beendet (die Reise bleibt offen)."));
                 return Outcome.ACTED;
             }
             if (!lebtNoch(screen, ctx, reserve.get()) && ctx.visibleIfKnown(screen, T_WATCH)) {
                 einheitenMerken(ctx, reserve.get());
-                if (ctx.clickIfVisibleIfKnown(screen, T_WATCH, WO + ": Alle Einheiten wiederherstellen (Restore all units, Video)")) {
+                if (ctx.clickIfVisibleIfKnown(screen, T_WATCH, WO + Sprache.t(": restore all units (Restore all units, video)", ": Alle Einheiten wiederherstellen (Restore all units, Video)"))) {
                     videoStarten(jetzt);
-                    Log.info(WO, "Alle Einheiten sind gefallen -- Video fuer \"Restore all units\". Waehrenddessen "
-                            + "wird nichts angeklickt.");
+                    Log.info(WO, Sprache.t("All units have fallen -- video for \"Restore all units\". Meanwhile ", "Alle Einheiten sind gefallen -- Video fuer \"Restore all units\". Waehrenddessen ")
+                            + Sprache.t("nothing is clicked.", "wird nichts angeklickt."));
                     return Outcome.ACTED;
                 }
             }
         }
         // Nie zweimal kurz hintereinander (30.09.: 112 Klicks auf das abgedunkelte Auto hinter der Warnung).
         if (jetzt - autoGeklicktUm < GemBayGrenzen.EINZELKLICK_SPERRE_MS) return warten(ctx);
-        if (!ctx.clickIfVisibleIfKnown(screen, T_AUTO, WO + ": Automodus einschalten (Auto)")) return warten(ctx);
+        if (!ctx.clickIfVisibleIfKnown(screen, T_AUTO, WO + Sprache.t(": switch on auto mode (Auto)", ": Automodus einschalten (Auto)"))) return warten(ctx);
         // Erst NACH dem wirklichen Klick merken (Pruefung 06.10.): vorher wurde die Zeit auch
         // gesetzt, wenn gar nicht geklickt wurde -- und dann 3 s lang nichts versucht.
         autoGeklicktUm = System.currentTimeMillis();
@@ -1697,21 +1705,21 @@ public final class GemBayMode implements GameMode {
             reserveSchiebungen = 0;
             reserveErlaubt = gesperrtGesehen = false;
             videoVergessen();
-            Log.info(WO, "Alle Einheiten sind wieder gruen (" + d + " s nach dem Video-Start) -- jetzt kommen erst die "
-                    + "Team-Einheiten hoch, die Reserve erst, wenn das Team noch einmal faellt.");
+            Log.info(WO, Sprache.t("All units are green again (", "Alle Einheiten sind wieder gruen (") + d + Sprache.t(" s after the video start) -- now first the ", " s nach dem Video-Start) -- jetzt kommen erst die ")
+                    + Sprache.t("team units go up, the reserve only when the team falls again.", "Team-Einheiten hoch, die Reserve erst, wenn das Team noch einmal faellt."));
             return null;
         }
         belebtGesehenUm = 0;
         if (jetzt - wiederbelebungSeit > WIEDERBELEBUNG_MAX_MS) {
-            Log.alarm(WO, "Die Einheiten sind " + d / 60 + " Minuten nach dem Video noch nicht wiederbelebt. Es geht ohne "
-                    + "weiter: erst die Reserve, faellt die auch, \"Claim reward\" und die naechste Reise.");
+            Log.alarm(WO, Sprache.t("The units are still not revived ", "Die Einheiten sind ") + d / 60 + Sprache.t(" minutes after the video. Carrying on without them: ", " Minuten nach dem Video noch nicht wiederbelebt. Es geht ohne ")
+                    + Sprache.t("first the reserve, if it falls too, \"Claim reward\" and the next journey.", "weiter: erst die Reserve, faellt die auch, \"Claim reward\" und die naechste Reise."));
             foto(ctx, "wiederbelebung");
             wiederbelebungSeit = 0;
             videoVergessen();
             return null;
         }
         if (jetzt - neuBetretenUm >= NEU_BETRETEN_MS && ctx.clickIfVisibleIfKnown(screen, T_X,
-                WO + ": kurz raus aus der Bucht und gleich wieder hinein (Einheiten noch grau, " + d + " s)")) {
+                WO + Sprache.t(": briefly out of the bay and straight back in (units still grey, ", ": kurz raus aus der Bucht und gleich wieder hinein (Einheiten noch grau, ") + d + " s)")) {
             neuBetretenUm = jetzt;
             ctx.sleepUntilChanged(1200);
             return Outcome.ACTED;
@@ -1778,7 +1786,7 @@ public final class GemBayMode implements GameMode {
         }
         teamBilder = team;
         reserveBilder = res;
-        Log.info(WO, "Gemerkt: " + team.size() + " gefallene Team-Einheiten, " + res.size() + " lebende Reserve-Einheiten.");
+        Log.info(WO, Sprache.t("Noted: ", "Gemerkt: ") + team.size() + Sprache.t(" fallen team units, ", " gefallene Team-Einheiten, ") + res.size() + Sprache.t(" living reserve units.", " lebende Reserve-Einheiten."));
     }
 
     /** Die gemerkten Bilder laden: [0] Team, [1] Reserve. */
@@ -1865,12 +1873,18 @@ public final class GemBayMode implements GameMode {
         return v;
     }
 
+    /** Offene Fassung: kein Lizenzschluessel -- mehr als kostenlose Reisen nur mit gembay-mehr.txt = "an". */
+    private static boolean istAutor() {
+        return false;
+    }
+
     private boolean kistenNoetig() {
-        return preis > 0 && nahrung >= 0 && nahrung < preis;
+        return preis > 0 && nahrung >= 0 && nahrung < preis
+                && GemBayGrenzen.kistenErlaubt(istAutor(), GemBayGrenzen.mehrAn());
     }
 
     private Outcome schliessen(Mat screen, BotContext ctx) {
-        if (ctx.clickIfVisibleIfKnown(screen, T_X, WO + ": Fenster schliessen")) {
+        if (ctx.clickIfVisibleIfKnown(screen, T_X, WO + Sprache.t(": close the window", ": Fenster schliessen"))) {
             ctx.sleepUntilChanged(800);
             return Outcome.ACTED;
         }
@@ -1889,7 +1903,7 @@ public final class GemBayMode implements GameMode {
         try {
             java.nio.file.Path datei = java.nio.file.Path.of("logs", "gembay-" + anlass + "-"
                     + de.hustlebot.core.Zeitzone.uhrzeit().format(java.time.format.DateTimeFormatter.ofPattern("HHmmss")) + ".png");
-            if (de.hustlebot.core.Beleg.schreiben(bild, "png", datei.toFile())) Log.info(WO, "Foto: " + datei);
+            if (de.hustlebot.core.Beleg.schreiben(bild, "png", datei.toFile())) Log.info(WO, Sprache.t("Photo: ", "Foto: ") + datei);
         } catch (Exception e) {
             Log.debug(WO, "Foto nicht gespeichert: " + e.getMessage());
         }
@@ -1968,7 +1982,7 @@ public final class GemBayMode implements GameMode {
                 battleBeginsKlicken(ctx, b.get(), kBeginnt);
                 grenzen.kampfZeichen(t);
                 blind = 0;
-                if (lauf != null) lauf.progress("Gem Bay: Wartezeit uebersprungen");
+                if (lauf != null) lauf.progress(Sprache.t("Gem Bay: waiting time skipped", "Gem Bay: Wartezeit uebersprungen"));
                 return Outcome.ACTED;
             }
             ohneKnopf = System.currentTimeMillis();
@@ -1995,13 +2009,13 @@ public final class GemBayMode implements GameMode {
      * sind die Nachklicks ueberfluessig (in Lauf 1 sassen alle 7 Erstklicks).
      */
     private static void battleBeginsKlicken(BotContext ctx, Matcher.Hit h, int[] kasten) {
-        ctx.klick(h, WO + ": Wartezeit ueberspringen (Battle begins)");
+        ctx.klick(h, WO + Sprache.t(": skip the waiting time (Battle begins)", ": Wartezeit ueberspringen (Battle begins)"));
         for (int i = 2; i <= GemBayGrenzen.AUTOKLICK_MAX; i++) {
             ctx.sleep(GemBayGrenzen.AUTOKLICK_ABSTAND_MS);
             if (kasten == null) return;
             Optional<Matcher.Hit> nochDa = ctx.kastenAufnahme(kasten, Matcher.DEFAULT_THRESHOLD, T_BEGINNT);
             if (nochDa.isEmpty()) return;
-            Log.debug(WO, "\"Battle begins\" ist noch da -- Klick " + i + " von " + GemBayGrenzen.AUTOKLICK_MAX
+            Log.debug(WO, "\"Battle begins\" ist noch da -- Klick " + i + Sprache.t(" of ", " von ") + GemBayGrenzen.AUTOKLICK_MAX
                     + " (Uebereinstimmung " + String.format("%.3f", nochDa.get().score()) + ").");
             ctx.input().click(nochDa.get());
         }
@@ -2016,7 +2030,7 @@ public final class GemBayMode implements GameMode {
         if (!ctx.visibleIfKnown(screen, T_BELOHNUNG)) return false;
         Matcher.Hit b = ctx.find(screen, T_BELOHNUNG).orElseThrow();
         int y = Math.min(ctx.height() - 20, b.centerY() + (int) (ctx.height() * 0.30));
-        Log.action("Klick", WO + ": Belohnungsfenster wegtippen  [" + b.centerX() + "," + y + "]");
+        Log.action("Klick", WO + Sprache.t(": tap away the reward window  [", ": Belohnungsfenster wegtippen  [") + b.centerX() + "," + y + "]");
         ctx.input().click(b.centerX(), y, 6);
         ctx.sleepUntilChanged(1200);
         return true;

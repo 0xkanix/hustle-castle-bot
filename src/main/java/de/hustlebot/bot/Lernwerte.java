@@ -46,8 +46,19 @@ final class Lernwerte {
         STANDARD.put("sieg_antippen",  new String[]{"aus", "Sieg-Animation antippen, damit Home frueher kommt (an/aus)"});
         STANDARD.put("sieg_tipp_ab_ms", new String[]{"450", "Erst so lange nach Kampf starten antippen"});
         STANDARD.put("kastenblick", new String[]{"an", "Nur die Stelle des erwarteten Knopfs ansehen, ~8 ms je Blick (an/aus); aus = die Fotozyklen"});
+        // 21.11.: Kastenblick gleich nach dem Wegpunkt-Klick (Truppenbildschirm oder Fenster) statt der ganzen
+        // Schrittkette. Eigener Schalter, weil fotozyklus_kampf in den schon angelegten Dateien auf "aus" steht.
+        STANDARD.put("anlauf_kastenblick", new String[]{"an", "Nach dem Wegpunkt per Kastenblick auf Truppenbildschirm oder Fenster warten (an/aus); aus = ganze Schrittkette (nur mit kastenblick)"});
+        // 21.11. (Autor: "Deploy the best muss gar nicht gedrueckt werden, wenn die Aufstellung schon steht"). Aus, bis
+        // im Spiel geprueft ist, dass gefallene Einheiten sicher erkannt werden.
+        STANDARD.put("aufstellen_sparen", new String[]{"aus", "Deploy the best weglassen, wenn die Truppe nach einem gewonnenen Kampf ohne Gefallene noch steht (an/aus; nur einfache Kaempfe, nicht Boss/Waechter)"});
         STANDARD.put("aufstellen_ms", new String[]{"70", "Pause zwischen Deploy the best und Quick Attack (nur mit kastenblick)"});
         STANDARD.put("wegplanung", new String[]{"an", "Kuerzesten Weg je Etage ausrechnen (an/aus); aus = die alte Wegsuche"});
+        STANDARD.put("gedaechtnisklick", new String[]{"an", "Feste Karte: verdeckten naechsten Stuetzpunkt an seiner gemerkten Stelle sofort anklicken statt warten (Bauplan L1, an/aus)"});
+        STANDARD.put("vorausweg", new String[]{"an", "Feste Karte: naechsten Schritt schon beim Klick ausrechnen, danach nur am Ziel nachsehen (Bauplan L2, an/aus)"});
+        STANDARD.put("wegsuche_schnell", new String[]{"an", "Wegwahl: Schloesser, Stuetzpunkte und Fragezeichen erst im halben Bild suchen (gleiche Treffer, schneller; an/aus)"});
+        // 21.11. (Autor: "nur noch an den Positionen der Wegpunkte suchen"): gleiche Treffer an 232 echten Etagenbildern.
+        STANDARD.put("kartenkaesten", new String[]{"an", "Feste Etagenkarte: Motive, Schloesser, Fragezeichen, Bosse und Waechter nur an den Stuetzpunkten suchen statt im ganzen Bild (an/aus)"});
         STANDARD.put("waechter_blick_ms", new String[]{"600", "Vor dem Waechter: zweiter Blick so lange nach dem Erscheinen der Etagenkarte (Schriftzug 'You have got a blessing' zieht weiter)"});
     }
 

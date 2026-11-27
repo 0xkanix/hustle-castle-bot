@@ -143,7 +143,7 @@ public final class Einstellungsaustausch {
             schalter("event-automatik.txt", "Event automation", "Event-Automatik", false, true),
             schalter("mauswache.txt", "Stop when the mouse moves", "Stopp bei Mausbewegung", true, false),   // liest jedes Mal neu
             schalter("arena-beobachter.txt", "Arena watcher", "Arena-Beobachter", true, false),
-            schalter("konten.txt", "Several game accounts", "Mehrere Spielkonten", false, false),
+            schalter("konten.txt", "Several game accounts", "Mehrere Spielkonten", true, false),   // Autor 21.11.: ohne Datei an
             zahl("event-lupen.txt", "Magnifiers per field", "Lupen je Feld", 0, 10, 5),
             // Code-Review 24.10.: die neuen Event-Abstaende mit austauschen
             zahl("event-hammer-alle.txt", "Hammer event every N cathedrals", "Hammer-Event alle N Kathedralen", 0, 500, 100),

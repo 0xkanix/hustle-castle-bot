@@ -152,6 +152,13 @@ public final class BotEngine {
     private volatile boolean zielErreicht = false;
 
     /**
+     * Hat der letzte Lauf wegen der Zeitgrenze (!ende / !off) aufgehoert? Dann startet die Warteschlange nichts mehr --
+     * auch wenn die Endzeit inzwischen geloescht oder verschoben wurde (Autor 18.11.: "Stoppzeit muss fuer die ganze
+     * Warteschlange gelten").
+     */
+    private volatile boolean durchZeitgrenzeBeendet = false;
+
+    /**
      * Ein Moduswechsel wurde gewuenscht, waehrend schon etwas laeuft.
      *
      * "!start kathedrale 50" mitten im Verlies: Der angefangene Durchlauf
@@ -224,6 +231,50 @@ public final class BotEngine {
     private long nachspielSperreBis;
 
     /** Wann die naechste Sperre endet: nur nach einem Nachspiel ohne gespieltes Turnier (sonst 0). */
+    /**
+     * Darf ein Arena-Nachspiel (Turnier-Balken) noch anfangen? Nicht mehr, sobald die Zeitgrenze erreicht ist
+     * ({@code finishingSince} gesetzt) -- Autor 18.11.: nach "!ende 18:50" wollte der Bot nach dem Verlies in die Arena.
+     */
+    static boolean nachspielErlaubt(long finishingSince) {
+        return finishingSince == 0;
+    }
+
+    /** Wie weit eine Warnung zurueckliegen darf, um als Grund fuer ein vorzeitiges Ende zu gelten. */
+    private static final long ENDE_GRUND_MS = 3 * 60_000L;
+
+    /**
+     * Ab so vielen geplanten Durchlaeufen heisst es "bis leer" (DiscordBridge.BIS_LEER = 100 000) -- dort ist ein
+     * Ende vor der Zahl normal und kein Abbruch.
+     */
+    private static final int BIS_LEER_AB = 100_000;
+
+    /** Hat der Modus vor der geplanten Zahl aufgehoert (nicht bei "bis leer")? */
+    static boolean vorzeitig(int fertig, int geplant) {
+        return fertig < geplant && geplant < BIS_LEER_AB;
+    }
+
+    /**
+     * Die Schlusszeile, wenn ein Modus mit FINISHED aufhoert (Autor 18.11. 21:51: "All 10 runs done" nach einem Abbruch).
+     * Alle geschafft: "Alle 10 Durchlaeufe erledigt." Vorher aufgehoert: "3 von 10 Durchlaeufen, dann abgebrochen: Grund"
+     * (ohne Grund: "... dann aufgehoert."). "Bis leer": "12 Durchlaeufe erledigt (bis leer)."
+     */
+    static String endeMeldung(int fertig, int geplant, String grund) {
+        boolean mitGrund = grund != null && !grund.isBlank();
+        if (geplant >= BIS_LEER_AB) {
+            return de.hustlebot.core.Sprache.t(fertig + " runs done (until empty)", fertig + " Durchlaeufe erledigt (bis leer)")
+                    + (mitGrund ? ": " + grund : ".");
+        }
+        if (!vorzeitig(fertig, geplant)) {
+            return de.hustlebot.core.Sprache.t("All " + geplant + " runs done.", "Alle " + geplant + " Durchlaeufe erledigt.")
+                    + (mitGrund ? " " + grund : "");
+        }
+        return mitGrund
+                ? de.hustlebot.core.Sprache.t(fertig + " of " + geplant + " runs, then stopped: ",
+                        fertig + " von " + geplant + " Durchlaeufen, dann abgebrochen: ") + grund
+                : de.hustlebot.core.Sprache.t(fertig + " of " + geplant + " runs, then the mode stopped (see the log).",
+                        fertig + " von " + geplant + " Durchlaeufen, dann hat der Modus aufgehoert (siehe Protokoll).");
+    }
+
     static long nachspielSperreBis(boolean turnierGespielt, long jetzt) {
         return turnierGespielt ? 0 : jetzt + NACHSPIEL_SPERRE_MS;
     }
@@ -280,6 +331,7 @@ public final class BotEngine {
         register(new ArenaMode());        // Arena/Turnier (Hauptbot 11.10., Freunde 3.0)
         register(new StigmaMode());       // "!stigmas loeschen" (Hauptbot 10.10., Freunde-Update)
         register(new EventMode());
+        register(new SpielQuestsMode());   // Taegliche Spiel-Quests (Buch in der Burg -> Daily quests, Autor 18.11.)
         register(new TitanEventMode());   // Titan-Grabung "Titanic Excavation" (Hauptbot 09./10.10., Freunde-Update)
         register(new ClanWarMode());
         register(new HeldenSetMode());   // Probe Helden-Set (Ben 17.10.)
@@ -313,6 +365,8 @@ public final class BotEngine {
         }
         // Autor 25.10.: je nach Thronsaal des Kontos gibt es Modi noch nicht (Kathedrale ab 6, Titanenturm ab 7,
         // Edelsteinbucht ab 8, Verlies ab 9) -- dann gleich "fertig", damit eine Kette mit dem naechsten Modus weitermacht.
+        // Vor dem "gesperrt"-Ende unten loeschen: sonst haette ein alter Zeitgrenzen-Vermerk die neue Kette angehalten.
+        durchZeitgrenzeBeendet = false;
         String konto = de.hustlebot.core.Konten.aktiv();
         if (konto.isBlank()) konto = MeinTeam.spielername();
         de.hustlebot.core.Thronsaal.aktuellSetzen(de.hustlebot.core.Thronsaal.stufe(konto));
@@ -335,7 +389,7 @@ public final class BotEngine {
         runsWhenFinishing = 0;
         haengerAbbruch = false;
         zielErreicht = false;
-        folge = null;
+        folgen = java.util.List.of();
         wechselAngefordert = false;
         wechselFertigSeit = 0;
         ersterSchritt = true;     // 11.10.: einmal nach dem Turnier-Balken der Arena sehen
@@ -359,9 +413,8 @@ public final class BotEngine {
         boolean withFriend = teammate != null && teammate.toLowerCase().startsWith("friend");
         boolean aufEinladungWarten = "friendwait".equalsIgnoreCase(teammate);
         if (mode instanceof DungeonMode dungeon) {
-            dungeon.setTeammate(
-                    withFriend ? DungeonMode.Teammate.FRIEND : DungeonMode.Teammate.RANDOM,
-                    friendName, aufEinladungWarten);
+            // 18.11.: "clan" = mit einem Clan-Mitglied (Quest "Go to a Dungeon with a clan mate") -- siehe DungeonMode.teammateAus.
+            dungeon.setTeammate(DungeonMode.teammateAus(teammate), friendName, aufEinladungWarten);
             dungeon.setLeaderPickTimeoutMinutes(leaderPickTimeoutMinutes);
             dungeon.setPartnerReadyTimeoutMinutes(partnerReadyTimeoutMinutes);
         }
@@ -439,18 +492,29 @@ public final class BotEngine {
         ctx.setSchnell(schnell);
         scanDelayMillis = schnell ? 40 : 120;
         mode.reset();
-        kontoGeprueft = !de.hustlebot.core.Konten.an();
-        kontoBilder = 0;
-        kontoLesungen = 0;
+        kontoPruefung.starten(de.hustlebot.core.Konten.an());
+        teamVorspiel = null;
 
         tracker = new RunTracker(runs);
         tracker.setIdleTimeoutMinutes(idleTimeoutMinutes);
         // Nach jedem Durchlauf sagen, wie oft verglichen wurde und wie viel
         // davon im kleinen Kasten lag. Danach bei null anfangen, damit die
         // Zahl immer fuer genau einen Durchlauf gilt.
+        // Sparsam-Messung 20.11.: was VOR diesem Start lief (z. B. stundenlanges Arena-Zuschauen), landete bisher im
+        // ersten Bericht des neuen Modus -- etwa 30.763 Chat-Suchen "im Gem Bay". Jetzt eigene Zeile, dann bei null.
+        String erkennungVorher = ctx.matcher().vergleichsBericht();
+        ctx.matcher().vergleicheZuruecksetzen();
+        String textVorher = de.hustlebot.core.Texterkennung.bericht();
+        if (!erkennungVorher.isBlank() && !erkennungVorher.equals(de.hustlebot.core.Sprache.t("no comparisons", "keine Vergleiche"))) {
+            Log.debug("Bilderkennung", de.hustlebot.core.Sprache.t("before this start: ", "vor diesem Start: ") + erkennungVorher);
+        }
+        if (!textVorher.isBlank()) Log.debug("Text", de.hustlebot.core.Sprache.t("before this start: ", "vor diesem Start: ") + textVorher);
         tracker.setErkennungsBericht(() -> {
             String bericht = ctx.matcher().vergleichsBericht();
             ctx.matcher().vergleicheZuruecksetzen();
+            // Sparsam 20.11.: Texterkennung je Durchlauf mitzaehlen (Zeilen, ms, aus dem Gedaechtnis, Modelle im Speicher)
+            String text = de.hustlebot.core.Texterkennung.bericht();
+            if (!text.isBlank()) Log.info("Text", text);
             return bericht;
         });
 
@@ -467,6 +531,13 @@ public final class BotEngine {
         Log.info("Motor", de.hustlebot.core.Sprache.t("Teammate: " + (withFriend ? "friend " + friendName : "random"),
                 "Mitspieler: " + (withFriend ? "Freund " + friendName : "zufaellig")));
         Log.info("Motor", de.hustlebot.core.Sprache.t("Stop: !stop in Discord.", "Anhalten: !stop in Discord."));
+        // Autor 18.11. (18:10): eine VOR dem Start gesetzte Endzeit stand nur weiter oben im Protokoll -- es sah aus, als
+        // waere sie beim Start verworfen worden. Jetzt steht sie bei jedem Start mit da (sie gilt fuer die ganze Warteschlange).
+        if (stopAtMillis > System.currentTimeMillis()) {
+            Log.info("Motor", de.hustlebot.core.Sprache.t(
+                    "Stop time: " + stopAtClock + " (in " + minutesUntilStop() + " minutes) -- after that nothing else from the queue starts.",
+                    "Endzeit: " + stopAtClock + " (in " + minutesUntilStop() + " Minuten) -- danach startet nichts mehr aus der Warteschlange."));
+        }
         Log.info("Motor", "=================================================");
 
         // Den alten Arbeitsfaden zu Ende kommen lassen (Code-Pruefung 26.09.):
@@ -494,6 +565,19 @@ public final class BotEngine {
         return true;
     }
 
+    /**
+     * Welche Modi erst in die Burg muessen, wenn das Spiel woanders steht. 15.11. (Berichte XPVY/U7BK, Robin, 3.142, 13.11.
+     * 12:15 und 12:35): Hing die Kathedrale 15 Minuten (Moduswechsel "Durchlauf hing"), startete der Titanen-Turm mitten auf
+     * der Verlies-Etage, kannte den Bildschirm nicht und brach nach 75 s ab; "Freunden senden" danach ebenso ("Burg nicht
+     * erkannt"). Beide kommen von der Etage nicht selbst weg -- darum wie Leuchtturm zuerst in die Burg.
+     */
+    static boolean vorBesuchNoetig(GameMode modus, boolean stigmaImTitanBildschirm) {
+        return modus instanceof LighthouseMode
+                || modus instanceof TitanTurmMode
+                || modus instanceof FreundeSendenMode
+                || (modus instanceof StigmaMode && !stigmaImTitanBildschirm);
+    }
+
     private void loop() {
         int consecutiveFailures = 0;
         int lastCountedRun = 0;
@@ -503,8 +587,7 @@ public final class BotEngine {
             // dort an, wo der letzte Modus aufgehoert hatte -- 20:38 in einem fertigen
             // Verlies, 27.09. 09:17 mitten im Verlies ("Bildschirm nicht erkannt").
             // Stigmas ebenso (15.10.): nach dem Titan-Event kannte die Stigma-Suche den Bildschirm nicht.
-            if (activeMode instanceof LighthouseMode
-                    || (activeMode instanceof StigmaMode && !StigmaMode.titanBildschirm(ctx))) {
+            if (vorBesuchNoetig(activeMode, activeMode instanceof StigmaMode && StigmaMode.titanBildschirm(ctx))) {
                 vorBesuchInDieBurg();
             }
 
@@ -645,6 +728,7 @@ public final class BotEngine {
                                 : de.hustlebot.core.Sprache.t("run was stuck, stopped after ", "Durchlauf hing, nach ") + (gewartet / 60000)
                                   + de.hustlebot.core.Sprache.t(" minutes", " Minuten abgebrochen");
                         Log.info("Motor", de.hustlebot.core.Sprache.t("Time limit: " + wie + ".", "Zeitgrenze: " + wie + "."));
+                        durchZeitgrenzeBeendet = true;   // fuer die Warteschlange: danach startet nichts mehr (18.11.)
                         setState(State.FERTIG, de.hustlebot.core.Sprache.t("Finished – ", "Beendet – ") + reason + " (" + wie
                                 + de.hustlebot.core.Sprache.t("). Done: ", "). Erledigt: ") + tracker.completedRuns() + de.hustlebot.core.Sprache.t(" runs.", " Durchlaeufe."));
                         return;
@@ -706,6 +790,18 @@ public final class BotEngine {
                 }
                 consecutiveFailures = 0;
 
+                // 15.11. / X3A2: Captcha ("Suspicious magical activity") VOR allem anderen. Solange es offen ist, klickt
+                // kein Modus; der Bot loest es NIE selbst, sondern ruft den Menschen.
+                if (captchaPruefen(screen)) {
+                    if (tracker != null) tracker.resetIdleClock();
+                    schlaf(300);
+                    continue;
+                }
+
+                // Autor 21.11.: Pflicht-Einfuehrung eines Events (Pfeil, Sprechblase, Hand) erst durchspielen -- das Spiel
+                // nimmt waehrenddessen nur Klicks auf das gezeigte Ziel an (Zweitkonto: eine Einfuehrung blockierte alles).
+                if (einfuehrungSchritt(screen)) continue;
+
                 // Autor 18.10.: Erzaehltexte ("My lord, ..." mit kleinem Pfeil unten -- neues Event, Burg-Stufe, ...)
                 // einfach wegdruecken, in jedem Modus.
                 if (dialogWegdruecken(screen)) continue;
@@ -723,14 +819,43 @@ public final class BotEngine {
 
                 // Autor 21.10. (Mia, mehrere Spielkonten): bei jedem Modus-Start den Spielernamen in der Burg lesen --
                 // ein anderes Konto? Dann erst dessen Dateien holen, bevor der Modus etwas tut.
-                if (!kontoGeprueft) kontoPruefen(screen);
+                // Konrad 20.11. (LT6E, Y9JU, VLD8, BUX9): Kontoname und Turnier-Balken liest der MOTOR per Texterkennung
+                // (beim ersten Mal samt Laden der Erkennung bis 11 s). Das ist kein Stillstand des Modus -- die Zeit wird
+                // der Haenger-Uhr gutgeschrieben, sonst kam "20 s kein Fortschritt, zuletzt: Start" kurz nach dem Start.
+                // Autor 21.11.: in JEDEM Modus -- erst in die Burg, Name lesen, wenn noetig die Spieler-ID im Profil;
+                // solange das laeuft, wartet der Modus (KontoPruefung). Neues Konto ohne Team-Scan: der Scan zuerst.
+                if (!kontoPruefung.fertig()) {
+                    long vorKonto = System.currentTimeMillis();
+                    boolean wartet;
+                    try {
+                        wartet = kontoPruefung.schritt(screen, ctx);
+                    } catch (Exception e) {
+                        Log.warn("Konten", Sprache.t("Account check failed: ", "Konto-Pruefung fehlgeschlagen: ") + e.getMessage());
+                        kontoPruefung.starten(false);
+                        wartet = false;
+                    }
+                    if (tracker != null) tracker.gutschreiben(System.currentTimeMillis() - vorKonto);
+                    if (wartet) continue;
+                }
+                if (kontoPruefung.gewechseltAbholen()) teamVorspielStarten();
+
+                // Bericht UK3S (Ben 19.11.): derselbe Klick wirkt immer wieder nicht -- erst das Fenster mit Nachdruck
+                // nach vorne holen, hilft das nicht, das Spiel neu starten (Klickwaechter). Danach ist das Bild veraltet.
+                if (klickSelbsthilfe(screen)) continue;
 
                 GameMode.Outcome outcome;
                 try {
                     GameMode.Outcome vorab = allgemeineStoerung(screen);
                     // Turnier-Balken oben (Autor, 11.10.): erst die Arena zu Ende spielen (Nachspiel).
-                    if (vorab == null && nachspiel == null) nachspielPruefen();
+                    // Autor 18.11. (18:50): nach der Endzeit (!ende) KEIN neues Nachspiel mehr -- der Bot wollte nach dem
+                    // Verlies noch in die Arena, statt aufzuhoeren. Ein schon laufendes Nachspiel spielt weiter wie bisher.
+                    if (vorab == null && nachspiel == null && teamVorspiel == null && nachspielErlaubt(finishingSince)) {
+                        long vorBalken = System.currentTimeMillis();
+                        nachspielPruefen();
+                        if (tracker != null) tracker.gutschreiben(System.currentTimeMillis() - vorBalken);
+                    }
                     outcome = vorab != null ? vorab
+                            : teamVorspiel != null ? teamVorspielSchritt(screen)
                             : nachspiel != null ? nachspielSchritt(screen)
                             : activeMode.step(screen, ctx, tracker);
                     if (activeMode.jetztInDieBurg()) {
@@ -784,7 +909,7 @@ public final class BotEngine {
 
                 switch (outcome) {
                     case FINISHED -> {
-                        folge = activeMode.folgeAuftrag();
+                        folgen = activeMode.folgeAuftraege();
                         String hinweis = activeMode.endeHinweis();
                         if (hinweis != null) {
                             try {
@@ -795,15 +920,18 @@ public final class BotEngine {
                         }
                         // Bericht K58J (19.10.): "All 100 runs done" stand da nach 1 Run, weil die Arena die Nahrung nicht lesen
                         // konnte. Mit Grund steht jetzt beides da, auch im Bot-Fenster und im Bericht an Autor.
-                        if (hinweis != null && !hinweis.isBlank()) {
-                            Log.info("Motor", de.hustlebot.core.Sprache.t("Ended after " + tracker.completedRuns() + " of " + tracker.targetRuns() + " runs: ",
-                                    "Beendet nach " + tracker.completedRuns() + " von " + tracker.targetRuns() + " Durchlaeufen: ") + hinweis);
-                        } else {
-                            Log.info("Motor", de.hustlebot.core.Sprache.t("All " + tracker.targetRuns() + " runs done.",
-                                    "Alle " + tracker.targetRuns() + " Durchlaeufe erledigt."));
-                        }
+                        // Autor 18.11. (21:51): "!start burgen 10" hoerte nach 3 Angriffen auf ("Weltkarte nicht erreicht"),
+                        // trotzdem stand "All 10 runs done" da. Jetzt nur noch, wenn wirklich alle geschafft sind; sonst
+                        // "1 von 10 Durchlaeufen, dann abgebrochen: <Grund>" (Grund: endeHinweis, sonst die letzte Warnung).
+                        // Konrad 20.11. (UJQ8): die Vorlagen-Warnung beim Laden ("Name doppelt vergeben: confirm") ist kein
+                        // Grund fuers Aufhoeren -- sie stand sonst als "dann abgebrochen: ..." hinter dem Clan-Krieg.
+                        String grund = hinweis != null && !hinweis.isBlank() ? hinweis
+                                : Log.letzteWarnung(ENDE_GRUND_MS, "Motor", "Vorlagen");
+                        Log.info("Motor", endeMeldung(tracker.completedRuns(), tracker.targetRuns(), grund));
                         zielErreicht = true;
                         setState(State.FERTIG, de.hustlebot.core.Sprache.t("Done: ", "Fertig: ") + tracker.completedRuns()
+                                + (vorzeitig(tracker.completedRuns(), tracker.targetRuns())
+                                        ? de.hustlebot.core.Sprache.t(" of ", " von ") + tracker.targetRuns() : "")
                                 + de.hustlebot.core.Sprache.t(" runs.", " Durchlaeufe.")
                                 + (hinweis != null && !hinweis.isBlank() ? " " + hinweis : ""));
                         return;
@@ -903,6 +1031,13 @@ public final class BotEngine {
         } catch (Exception e) {
             Log.error("Motor", de.hustlebot.core.Sprache.t("Unexpected error in the main loop", "Unerwarteter Fehler in der Hauptschleife"), e);
             setState(State.FEHLER, de.hustlebot.core.Sprache.t("Unexpected error: ", "Unerwarteter Fehler: ") + e.getMessage());
+        } catch (OutOfMemoryError e) {
+            // 21.11. (Nacht, -Xmx192m): ein OutOfMemoryError ist kein Exception -- der Motorfaden starb still, der Zustand blieb
+            // LAEUFT, kein Log, kein Hinweis, der Clankrieg 02:20 wurde verpasst. Jetzt: melden und auf FEHLER stellen.
+            Log.error("Motor", de.hustlebot.core.Sprache.t("Out of memory (OutOfMemoryError) -- the bot stops here. Restart the bot; "
+                    + "if it happens again, raise -Xmx in HustleBot.cfg.", "Speicher voll (OutOfMemoryError) -- der Bot haelt hier an. "
+                    + "Bot neu starten; kommt es wieder vor, -Xmx in HustleBot.cfg erhoehen."));
+            setState(State.FEHLER, de.hustlebot.core.Sprache.t("Out of memory -- please restart the bot.", "Speicher voll -- bitte den Bot neu starten."));
         } finally {
             // Gelernte Knopfstellen fuer den naechsten Start aufheben.
             ctx.matcher().stellenSpeichern(Matcher.STELLEN_DATEI);
@@ -1090,41 +1225,104 @@ public final class BotEngine {
         haengerMelder = melder;
     }
 
-    // ---- Konto-Profile (Autor 21.10., Mia mit mehreren Spielkonten) ---------------------------------------------
-    private volatile boolean kontoGeprueft = true;
-    private int kontoBilder, kontoLesungen;
-    private long kontoNochmalAb;
-
     /**
-     * Liest einmal je Modus-Start den Spielernamen oben links in der Burg (ohne Klick) und wechselt bei Bedarf das Konto
-     * (siehe core.Konten). Ein neuer Name braucht zwei gleiche Lesungen (2 s auseinander). Nach 20 Bildern ohne Burg
-     * wird es fuer diesen Start gelassen.
+     * Ein Modus meldet etwas, das der Spieler sehen sollte (21.11.: unbekanntes Etagenmuster der Kathedrale). Die offene
+     * Fassung schickt nichts weg -- es steht nur im eigenen Protokoll (das Bild wird nicht gesendet).
      */
-    private void kontoPruefen(Mat screen) {
-        if (System.currentTimeMillis() < kontoNochmalAb) return;
-        if (!(ctx.visibleIfKnown(screen, "map_button") || ctx.visibleIfKnown(screen, "map_button_alt"))) {
-            if (++kontoBilder > 20) kontoGeprueft = true;
+    public static void berichtMelden(String text, byte[] png) {
+        if (text == null || text.isBlank()) return;
+        Log.warn("Motor", text);
+    }
+
+    // ---- Konto-Profile (Autor 21.10., Mia mit mehreren Spielkonten; seit 21.11. in jedem Modus, siehe KontoPruefung) ----
+    private final KontoPruefung kontoPruefung = new KontoPruefung();
+
+    // ---- Team-Scan vor dem Modus, wenn ein Konto noch keinen hat (Autor 21.11.) ---------------------------------------
+    // "Wenn der Bot merkt, dass er nicht auf dem Autor-Account ist, soll er beim anderen Account automatisch das Team
+    // scannen" -- und erst danach den gewuenschten Modus spielen. Gebaut wie das Arena-Nachspiel: der Modus bleibt aktiv,
+    // der Motor ruft solange den Team-Scan. Einmal je Konto und Botlauf, nie in Schleife; klappt er nicht: Log + Modus.
+    private volatile TeamScanMode teamVorspiel;
+    private RunTracker teamVorspielTracker;
+    private long teamVorspielSeit;
+    private static final long TEAM_VORSPIEL_FRIST_MS = 12 * 60_000, TEAM_VORSPIEL_STILL_MS = 3 * 60_000;
+    private static final java.util.Set<String> TEAM_VORSPIEL_KONTEN = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+    /** Kommt vor diesem Modus der Team-Scan? Nicht vor Botengaengen (Clankrieg, Leuchtturm, Team-Scan selbst ...). */
+    static boolean teamVorspielNoetig(String modus, boolean ohneScan) {
+        return modus != null && ohneScan && !istBotengang(modus);
+    }
+
+    private void teamVorspielStarten() {
+        if (teamVorspiel != null || activeMode == null) return;
+        if (!teamVorspielNoetig(activeMode.id(), MeinTeam.ohneScan())) return;
+        String konto = Konten.aktiv();
+        if (!TEAM_VORSPIEL_KONTEN.add(konto.toLowerCase(java.util.Locale.ROOT))) return;
+        if (!(modes.get("teamscan") instanceof TeamScanMode scan)) {
+            Log.info("Konten", Sprache.t("Account \"" + konto + "\" has no team scan yet -- this version has no team scan.",
+                    "Konto \"" + konto + "\" hat noch keinen Team-Scan -- diese Fassung hat keinen Team-Scan."));
             return;
         }
-        String name = Burgstand.spieler(screen, ctx).getOrDefault("Name", "");
-        kontoLesungen++;
-        java.util.Optional<String> k = de.hustlebot.core.Konten.erkennen(name);
-        if (k.isPresent()) {
-            kontoGeprueft = true;
-            if (de.hustlebot.core.Konten.wechseln(k.get(), ctx.matcher().templateRoot())) {
-                de.hustlebot.core.Gegnerbuch.gemeinsam().neuLaden();
-                de.hustlebot.core.Bezahlung.neuLaden();
-                ctx.matcher().loadAll();   // die Gegnerlisten des Kontos
-            }
+        List<String> fehlt = ctx.matcher().missing(scan.requiredTemplates());
+        if (!fehlt.isEmpty()) {
+            Log.warn("Konten", Sprache.t("Account \"" + konto + "\" has no team scan yet, but the scan is missing " + fehlt.size()
+                            + " images -- " + activeMode.displayName() + " starts without it.",
+                    "Konto \"" + konto + "\" hat noch keinen Team-Scan, dem Scan fehlen aber " + fehlt.size() + " Vorlagen -- "
+                            + activeMode.displayName() + " startet ohne ihn."));
             return;
         }
-        // Unbekannter Name: ein zweites Mal lesen (2 s spaeter), dann entscheidet Konten.erkennen.
-        if (kontoLesungen < 2 && !name.isBlank()
-                && !de.hustlebot.core.ArenaVorlagenDoppelt.derselbeName(name, de.hustlebot.core.Konten.aktiv())) {
-            kontoNochmalAb = System.currentTimeMillis() + 2_000;
-            return;
+        scan.reset();
+        teamVorspielTracker = new RunTracker(1);
+        teamVorspielTracker.setIdleTimeoutMinutes(idleTimeoutMinutes);
+        teamVorspielSeit = System.currentTimeMillis();
+        teamVorspiel = scan;
+        if (tracker != null) tracker.progress(Sprache.t("Team scan for the account", "Team-Scan fuer das Konto"));
+        Log.hinweis("Konten", Sprache.t("Account \"" + konto + "\" has no team scan yet -- the bot looks at its team first, then "
+                        + activeMode.displayName() + " starts.",
+                "Das Konto \"" + konto + "\" hat noch keinen Team-Scan -- der Bot sieht sich zuerst sein Team an, danach startet "
+                        + activeMode.displayName() + "."));
+        setStatusText(Sprache.t("Team scan for the new account, then ", "Team-Scan fuer das neue Konto, danach ") + activeMode.displayName() + ".");
+    }
+
+    /** Ein Schritt des Team-Scans vor dem Modus. FINISHED/FATAL/PAUSE beenden nur den Scan, nie den Modus. */
+    private GameMode.Outcome teamVorspielSchritt(Mat screen) {
+        TeamScanMode scan = teamVorspiel;
+        if (scan == null) return GameMode.Outcome.WAITING;
+        GameMode.Outcome o;
+        try {
+            o = scan.step(screen, ctx, teamVorspielTracker);
+        } catch (Exception e) {
+            Log.error("Konten", Sprache.t("Error in the team scan before the mode", "Fehler im Team-Scan vor dem Modus"), e);
+            teamVorspielBeenden(Sprache.t("error", "Fehler"));
+            return GameMode.Outcome.WAITING;
         }
-        kontoGeprueft = true;
+        if ((o == GameMode.Outcome.ACTED || teamVorspielTracker.idleSeconds() < 2) && tracker != null) {
+            tracker.progress(Sprache.t("Team scan for the account", "Team-Scan fuer das Konto"));
+        }
+        long dauer = System.currentTimeMillis() - teamVorspielSeit;
+        if (o == GameMode.Outcome.FINISHED) {
+            teamVorspielBeenden(Sprache.t("done", "fertig"));
+        } else if (o == GameMode.Outcome.FATAL || o == GameMode.Outcome.PAUSE) {
+            teamVorspielBeenden(Sprache.t("the scan got stuck (" + o + ")", "der Scan kam nicht weiter (" + o + ")"));
+        } else if (dauer > TEAM_VORSPIEL_FRIST_MS) {
+            teamVorspielBeenden(Sprache.t("not finished after " + dauer / 60000 + " minutes", "nach " + dauer / 60000 + " Minuten nicht fertig"));
+        } else if (teamVorspielTracker.idleSeconds() * 1000L > TEAM_VORSPIEL_STILL_MS) {
+            teamVorspielBeenden(Sprache.t(teamVorspielTracker.idleSeconds() + " s without progress",
+                    teamVorspielTracker.idleSeconds() + " s ohne Fortschritt"));
+        }
+        return o == GameMode.Outcome.ACTED ? GameMode.Outcome.ACTED : GameMode.Outcome.WAITING;
+    }
+
+    private void teamVorspielBeenden(String grund) {
+        teamVorspiel = null;
+        MeinTeam.kontoGewechselt();   // das Ergebnis frisch lesen (gilt fuer das Konto, steht in seiner arena-ich.txt)
+        String weiter = activeMode == null ? Sprache.t("the mode", "dem Modus") : activeMode.displayName();
+        Log.info("Konten", Sprache.t("Team scan before the mode finished (" + grund + ") -- continuing with " + weiter + ".",
+                "Team-Scan vor dem Modus beendet (" + grund + ") -- jetzt weiter mit " + weiter + "."));
+        if (tracker != null) {
+            tracker.resetIdleClock();
+            tracker.progress(Sprache.t("continuing with " + weiter, "weiter mit " + weiter));
+        }
+        setStatusText(Sprache.t("Continuing with ", "Weiter mit ") + weiter + ".");
     }
 
     private void haengerPruefen(RunTracker tracker) {
@@ -1544,6 +1742,17 @@ public final class BotEngine {
                 "Hustle Castle laeuft seit " + alter + " und wird mit der Zeit langsamer -- Neustart fuer mehr Tempo "
                         + "(alle 2 Stunden; Schalter: Einstellungen -> Kathedrale)."));
         setStatusText(Sprache.t("Restarting Hustle Castle (every 2 hours) ...", "Hustle Castle wird neu gestartet (alle 2 Stunden) ..."));
+        spielNeuStartenBisBurg();
+    }
+
+    /**
+     * Hustle Castle beenden, ueber den Launcher neu oeffnen, bis in die Burg laden lassen (hoechstens 2 min) und den
+     * Modus zuruecksetzen -- danach spielt er weiter wie nach jedem Neustart. Gemeinsamer Weg fuer den Neustart alle
+     * 2 Stunden und die Selbsthilfe gegen wirkungslose Klicks (Bericht UK3S, {@link #klickSelbsthilfe}).
+     *
+     * @return false, wenn das Spiel nicht wieder startete
+     */
+    private boolean spielNeuStartenBisBurg() throws InterruptedException {
         long begonnen = System.currentTimeMillis();
         Mauswache.ruheFuer(240_000);   // der Launcher klickt mit eigener Maus
         try {
@@ -1552,12 +1761,13 @@ public final class BotEngine {
             GameLauncher.Ergebnis e = GameLauncher.sicherstellen(ctx.window());
             if (!e.ok()) {
                 Log.warn("Spiel-Neustart", Sprache.t("The game did not start again: ", "Das Spiel startete nicht wieder: ") + e.meldung());
-                return;
+                return false;
             }
             // Bis in die Burg laden lassen (hoechstens 2 min): sobald der Karten-Knopf zu sehen ist, geht es weiter.
             long bis = System.currentTimeMillis() + 120_000;
             boolean burg = false;
             while (!stopRequested && System.currentTimeMillis() < bis) {
+                lastLoopHeartbeat = System.currentTimeMillis();   // die Hauptschleife lebt (kein "Bot antwortet nicht")
                 Mat bild = ctx.refresh();
                 if (bild != null && (ctx.visibleIfKnown(bild, "map_button") || ctx.visibleIfKnown(bild, "map_button_alt"))) {
                     burg = true;
@@ -1568,14 +1778,137 @@ public final class BotEngine {
             Log.info("Spiel-Neustart", burg
                     ? Sprache.t("Hustle Castle is back in the castle after " + (System.currentTimeMillis() - begonnen) / 1000 + " s -- carrying on.",
                             "Hustle Castle ist nach " + (System.currentTimeMillis() - begonnen) / 1000 + " s wieder in der Burg -- weiter geht's.")
-                    : Sprache.t("The castle was not seen within 2 minutes -- the cathedral tries to find its way by itself.",
-                            "Die Burg war nach 2 Minuten nicht zu sehen -- die Kathedrale sucht sich den Weg selbst."));
+                    : Sprache.t("The castle was not seen within 2 minutes -- the mode tries to find its way by itself.",
+                            "Die Burg war nach 2 Minuten nicht zu sehen -- der Modus sucht sich den Weg selbst."));
             activeMode.reset();
             // Bericht YLG4 (Mia, 19.10.): Der Neustart dauert gut 30 s, danach schlug die Stillstands-Uhr (20 s) an,
             // obwohl alles lief. Der Neustart ist Fortschritt.
             if (tracker != null) tracker.progress(Sprache.t("Game restarted", "Spiel neu gestartet"));
+            return true;
         } finally {
             Mauswache.ruheFuer(3_000);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    //  Selbsthilfe: derselbe Klick wirkt immer wieder nicht (Bericht UK3S)
+    // ------------------------------------------------------------------
+
+    private long waechterGeprueftUm = 0;
+    /** Die Folge (Klick + Uhrzeit des ersten), fuer die die Stufen unten gelten; eine neue Folge faengt von vorn an. */
+    private String waechterFolge = "";
+    private boolean waechterNachVorn = false;
+    /** Grobes Bild zu Beginn der Folge (nach Stufe 1: direkt danach) und die groesste Abweichung davon seither. */
+    private byte[] waechterBild = null;
+    private double waechterAbweichung = 0;
+    private final java.util.EnumSet<Klickwaechter.Schritt> waechterGemeldet = java.util.EnumSet.noneOf(Klickwaechter.Schritt.class);
+    /** Klicks vor diesem Zeitpunkt zaehlen nicht (letzter Selbsthilfe-Neustart). */
+    private long waechterAb = 0;
+    private final java.util.ArrayDeque<Long> selbsthilfeNeustarts = new java.util.ArrayDeque<>();
+
+    /**
+     * BERICHT UK3S (Ben 19.11.): Das Spielfenster verlor den Vordergrund, danach klickte der Bot 32-mal in 69 s auf
+     * "Home" -- ohne Wirkung -- und kam nie heraus. Stufe 1: Fenster mit Nachdruck nach vorne, Stufe 2: Spiel neu
+     * starten. Entschieden wird in {@link Klickwaechter} (reine Rechnung, getestet), hier wird nur gehandelt.
+     *
+     * @return true = Fenster geholt oder Spiel neu gestartet: das Bild ist veraltet, die Schleife faengt neu an
+     */
+    private boolean klickSelbsthilfe(Mat screen) throws InterruptedException {
+        if (tracker == null || activeMode == null || paused || pausiert() || stopRequested) return false;
+        if (activeMode.inEmpfindlicherPhase()) return false;   // Werbung laeuft: der Modus steuert selbst
+        long jetzt = System.currentTimeMillis();
+        if (jetzt - waechterGeprueftUm < 1000) return false;   // Log.snapshot kopiert bis zu 2000 Zeilen
+        waechterGeprueftUm = jetzt;
+
+        Klickwaechter.Folge f = Klickwaechter.folge(Log.snapshot(), java.time.LocalTime.now(),
+                Math.min(10 * 60_000L, jetzt - waechterAb));
+        String id = f.klick() + "@" + f.erstesUm();
+        if (!id.equals(waechterFolge)) {
+            waechterFolge = id;
+            waechterNachVorn = false;
+            waechterBild = null;
+            waechterAbweichung = 0;
+            waechterGemeldet.clear();
+        }
+        // Bild-Probe: ab dem zweiten gleichen Klick ein grobes Bild als Ausgangspunkt, danach je Sekunde die groesste
+        // Abweichung davon mitfuehren (nach Stufe 1 neuer Ausgangspunkt).
+        if (f.anzahl() < 2) return false;
+        if (waechterBild == null && !waechterNachVorn) {
+            waechterBild = Klickwaechter.fingerabdruck(screen);
+        } else {
+            waechterAbweichung = Math.max(waechterAbweichung,
+                    Klickwaechter.abweichung(waechterBild, Klickwaechter.fingerabdruck(screen)));
+        }
+        if (f.anzahl() < Klickwaechter.NACH_VORN_AB) return false;
+        while (!selbsthilfeNeustarts.isEmpty() && jetzt - selbsthilfeNeustarts.peekFirst() > 3_600_000L) {
+            selbsthilfeNeustarts.pollFirst();
+        }
+        GameWindow fenster = ctx.window();
+        boolean haengt = fenster.reagiertNicht();
+        // Die Kampf-Probe kostet ein paar Vollbildsuchen -- nur, wenn sonst neu gestartet wuerde.
+        boolean kampf = waechterNachVorn && Klickwaechter.neustartReif(f) && !haengt
+                && Klickwaechter.kampfZuSehen(v -> ctx.visibleIfKnown(screen, v));
+        boolean still = waechterBild != null && Klickwaechter.still(waechterAbweichung);
+        Klickwaechter.Schritt s = Klickwaechter.entscheiden(f, fenster.isForeground(), waechterNachVorn, still, haengt,
+                kampf, selbsthilfeNeustarts.size());
+        String klick = "\"" + f.text() + "\"";
+        switch (s) {
+            case NACH_VORN -> {
+                Log.warn("Motor", Sprache.t("Self-help: the same click has had no effect " + f.anzahl() + " times in a row ("
+                                + klick + "). The game window is brought to the front with force and photographed again.",
+                        "Selbsthilfe: derselbe Klick wirkt " + f.anzahl() + "-mal in Folge nicht (" + klick
+                                + "). Das Spielfenster wird mit Nachdruck nach vorne geholt und neu fotografiert."));
+                boolean vorn = !haengt && fenster.nachVorneZwingen();
+                Thread.sleep(500);
+                waechterBild = Klickwaechter.fingerabdruck(ctx.refresh());
+                waechterAbweichung = 0;
+                waechterNachVorn = true;
+                Log.info("Motor", Sprache.t("Self-help: game window in front: " + (vorn ? "yes" : "no")
+                                + ", game responds: " + (haengt ? "NO (Windows: not responding)" : "yes")
+                                + ", in front lies: " + GameWindow.vordergrund() + ".",
+                        "Selbsthilfe: Spielfenster vorne: " + (vorn ? "ja" : "nein")
+                                + ", Spiel antwortet: " + (haengt ? "NEIN (Windows: keine Rueckmeldung)" : "ja")
+                                + ", vorne liegt: " + GameWindow.vordergrund() + "."));
+                return true;
+            }
+            case NEUSTART -> {
+                selbsthilfeNeustarts.addLast(jetzt);
+                Log.warn("Motor", Sprache.t("Self-help: the click still has no effect (" + f.anzahl() + " times in "
+                                + f.dauerMs() / 1000 + " s, " + klick + ")"
+                                + (haengt ? ", and Windows reports the game as not responding" : ", the picture stands still")
+                                + ". Hustle Castle is restarted (like the restart every 2 hours), then the mode carries on.",
+                        "Selbsthilfe: der Klick wirkt weiter nicht (" + f.anzahl() + "-mal in " + f.dauerMs() / 1000
+                                + " s, " + klick + ")"
+                                + (haengt ? ", und Windows meldet das Spiel als \"keine Rueckmeldung\"" : ", das Bild steht still")
+                                + ". Hustle Castle wird neu gestartet (wie der Neustart alle 2 Stunden), danach macht der Modus weiter."));
+                GameLauncher.wiederErlauben();   // wie beim Absturz: es laeuft ein Modus, das Spiel soll laufen
+                spielAbsturzUm = System.currentTimeMillis();   // Verlies: dieser Lauf zaehlt nicht
+                setStatusText(Sprache.t("Self-help: restarting Hustle Castle ...", "Selbsthilfe: Hustle Castle wird neu gestartet ..."));
+                boolean ok = spielNeuStartenBisBurg();
+                waechterAb = System.currentTimeMillis();
+                Log.warn("Motor", ok
+                        ? Sprache.t("Self-help: Hustle Castle restarted, the mode carries on.",
+                                "Selbsthilfe: Hustle Castle neu gestartet, der Modus macht weiter.")
+                        : Sprache.t("Self-help: the restart did not work -- the bot carries on as before (stuck report, stop after 15 minutes).",
+                                "Selbsthilfe: der Neustart klappte nicht -- weiter wie bisher (Haenger-Bericht, Abbruch nach 15 Minuten)."));
+                return true;
+            }
+            case KAMPF_ABWARTEN, BILD_BEWEGT_SICH, AUSGESCHOEPFT -> {
+                if (waechterGemeldet.add(s)) {
+                    Log.warn("Motor", switch (s) {
+                        case KAMPF_ABWARTEN -> Sprache.t("Self-help: the click still has no effect, but a battle is running -- no restart in the middle of a battle.",
+                                "Selbsthilfe: der Klick wirkt weiter nicht, aber ein Kampf laeuft -- kein Neustart mitten im Kampf.");
+                        case BILD_BEWEGT_SICH -> Sprache.t("Self-help: the same click repeats, but the picture keeps changing -- the clicks may do something after all. No restart.",
+                                "Selbsthilfe: derselbe Klick wiederholt sich, aber das Bild veraendert sich -- die Klicks bewirken vielleicht doch etwas. Kein Neustart.");
+                        default -> Sprache.t("Self-help: the game was already restarted " + Klickwaechter.NEUSTARTS_JE_STUNDE + " times in the last hour -- no further restart.",
+                                "Selbsthilfe: das Spiel wurde in der letzten Stunde schon " + Klickwaechter.NEUSTARTS_JE_STUNDE + "-mal neu gestartet -- kein weiterer Neustart.");
+                    });
+                }
+                return false;
+            }
+            default -> {
+                return false;
+            }
         }
     }
 
@@ -1852,8 +2185,6 @@ public final class BotEngine {
         this.stopAfterMinutes = Math.max(0, minutes);
     }
 
-    /** Zeitzone fuer die Abschaltzeit: Autor wohnt in Bayern. */
-    public static final java.time.ZoneId ZONE = java.time.ZoneId.of("Europe/Berlin");
 
     /**
      * Legt die Uhrzeit fest, zu der der Bot von selbst aufhoert, etwa "06:30".
@@ -1891,13 +2222,17 @@ public final class BotEngine {
             return;
         }
 
-        java.time.ZonedDateTime now = java.time.ZonedDateTime.now(ZONE);
+        // Konrad 19.11.: richtige Weltzeit (Windows-Uhr kann falsch gehen); verglichen wird spaeter mit der Rechneruhr.
+        // 20.11. (Geschwister): in der eingestellten Zone des Spielers (ohne Einstellung Europe/Berlin) -- bisher fest Berlin,
+        // ein Freund in London ("!ende 06:30") haette eine Stunde zu frueh aufgehoert. Zeitleiste rechnet genauso.
+        java.time.ZonedDateTime now = java.time.ZonedDateTime.ofInstant(de.hustlebot.core.Weltuhr.jetzt(),
+                de.hustlebot.core.Zeitzone.zone());
         java.time.ZonedDateTime target = now
                 .withHour(hour).withMinute(minute).withSecond(0).withNano(0);
         if (!target.isAfter(now)) target = target.plusDays(1);
 
         this.stopAtClock = String.format("%02d:%02d", hour, minute);
-        this.stopAtMillis = target.toInstant().toEpochMilli();
+        this.stopAtMillis = de.hustlebot.core.Weltuhr.rechnerMs(target.toInstant());
 
         Log.info("Motor", de.hustlebot.core.Sprache.t(
                 "Stop time set: " + this.stopAtClock + " on "
@@ -1921,13 +2256,16 @@ public final class BotEngine {
     /** True, wenn der letzte Lauf alle geplanten Durchlaeufe geschafft hat. */
     public boolean zielErreicht() { return zielErreicht; }
 
-    /** Was der eben fertig gewordene Modus noch angehaengt haben will (einmal abholbar). */
-    private volatile GameMode.Folge folge;
+    /** True, wenn der letzte Lauf wegen der Zeitgrenze (!ende / !off) aufgehoert hat (18.11.). */
+    public boolean durchZeitgrenzeBeendet() { return durchZeitgrenzeBeendet; }
 
-    public GameMode.Folge folgeAbholen() {
-        GameMode.Folge f = folge;
-        folge = null;
-        return f;
+    /** Was der eben fertig gewordene Modus noch angehaengt haben will, der Reihe nach (einmal abholbar, nie null). */
+    private volatile java.util.List<GameMode.Folge> folgen = java.util.List.of();
+
+    public java.util.List<GameMode.Folge> folgenAbholen() {
+        java.util.List<GameMode.Folge> f = folgen;
+        folgen = java.util.List.of();
+        return f == null ? java.util.List.of() : f;
     }
 
     /**
@@ -1940,6 +2278,118 @@ public final class BotEngine {
      *
      * @return false, wenn gerade gar nichts laeuft
      */
+    // ------------------------------------------------------------------
+    //  Captcha: erkennen, anhalten, Mensch rufen -- nie selbst loesen (15.11. / X3A2)
+    // ------------------------------------------------------------------
+
+    private final CaptchaWache captchaWache = new CaptchaWache(
+            de.hustlebot.core.Captcha::wert,
+            w -> w >= de.hustlebot.core.Captcha.SCHWELLE,
+            new CaptchaWache.Folgen() {
+                @Override
+                public void neu(Mat screen, double wert) {
+                    Log.alarm("Captcha", String.format(java.util.Locale.ROOT, de.hustlebot.core.Sprache.t(
+                            "Captcha detected (match %.2f). The bot clicks NOTHING more -- please solve it in the game yourself. "
+                            + "It carries on by itself once the captcha is gone.",
+                            "Captcha erkannt (Treffer %.2f). Der Bot klickt NICHTS mehr -- bitte im Spiel selbst loesen. "
+                            + "Er macht von allein weiter, sobald das Captcha weg ist."), wert));
+                    captchaFotoSpeichern(screen);
+                    setStatusText(de.hustlebot.core.Sprache.t(
+                            "Captcha open – solve it in the game yourself. The bot waits.",
+                            "Captcha offen – bitte im Spiel selbst loesen. Der Bot wartet."));
+                    captchaMelden(String.format(java.util.Locale.ROOT, "Captcha (match %.2f)", wert));
+                }
+
+                @Override
+                public void erinnerung(long minutenOffen) {
+                    Log.alarm("Captcha", de.hustlebot.core.Sprache.t(
+                            "The captcha has been open for " + minutenOffen + " minutes. The bot is still waiting for you.",
+                            "Das Captcha ist seit " + minutenOffen + " Minuten offen. Der Bot wartet weiter auf dich."));
+                    captchaMelden("Captcha open for " + minutenOffen + " min");
+                }
+
+                @Override
+                public void weg(long sekundenOffen) {
+                    Log.info("Captcha", de.hustlebot.core.Sprache.t(
+                            "The captcha is gone (after " + sekundenOffen + " s). The bot carries on.",
+                            "Das Captcha ist weg (nach " + sekundenOffen + " s). Der Bot macht weiter."));
+                    setStatusText(de.hustlebot.core.Sprache.t("Captcha gone – carrying on.", "Captcha weg – es geht weiter."));
+                }
+            },
+            // Standard AUS: nur "an" in captcha-wache.txt schaltet die Wache ein (Autor 29.10.: Captcha ausgebaut)
+            new de.hustlebot.core.Schalterdatei(java.nio.file.Path.of("captcha-wache.txt"), "Captcha", false)::lesen);
+
+    /** true, solange ein Captcha offen ist: niemand sonst darf klicken, der Aufrufer beginnt von vorn. */
+    private boolean captchaPruefen(Mat screen) {
+        try {
+            return captchaWache.pruefen(screen, System.currentTimeMillis());
+        } catch (Exception e) {
+            Log.debug("Captcha", "Pruefung: " + e.getMessage());
+            return captchaWache.offen();
+        }
+    }
+
+    /** Bericht an den Menschen (Discord-Bericht/Haenger-Weg des Steuerprogramms). */
+    private void captchaMelden(String text) {
+        var bericht = haengerMelder;
+        if (bericht == null) return;
+        try {
+            bericht.accept(text);
+        } catch (Exception e) {
+            Log.debug("Captcha", "Bericht: " + e.getMessage());
+        }
+    }
+
+    /** Foto des Captchas in logs\ -- zum Nachstellen der Erkennung. */
+    private void captchaFotoSpeichern(Mat screen) {
+        try {
+            String name = "logs/captcha_" + java.time.LocalDateTime.now().format(
+                    java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss")) + ".png";
+            org.opencv.imgcodecs.Imgcodecs.imwrite(name, screen);
+            Log.info("Captcha", de.hustlebot.core.Sprache.t("Picture saved: " + name, "Foto gespeichert: " + name));
+        } catch (Exception e) {
+            Log.debug("Captcha", "Foto liess sich nicht speichern: " + e.getMessage());
+        }
+    }
+
+    private final Einfuehrung einfuehrung = new Einfuehrung();
+
+    /**
+     * Autor 21.11.: Einfuehrung (Tutorial) eines Events selbst durchspielen, in JEDEM Modus. true = gehandelt oder neue
+     * Bilder geholt -- das Bild ist veraltet, die Schleife nimmt neu auf. Nach dem Ende geht es zur Burg.
+     */
+    private boolean einfuehrungSchritt(Mat screen) {
+        if (activeMode == null || activeMode.inEmpfindlicherPhase()) return false;   // Werbung: nie hineintippen
+        Einfuehrung.Ergebnis e;
+        try {
+            e = einfuehrung.schritt(screen, ctx, activeMode.displayName());
+        } catch (Exception ex) {
+            Log.debug("Motor", "Einfuehrung: " + ex.getMessage());
+            return false;
+        }
+        switch (e) {
+            case GEHANDELT -> {
+                if (tracker != null) tracker.progress(Sprache.t("Event introduction: step", "Event-Einfuehrung: Schritt"));
+                return true;
+            }
+            case BILD_VERALTET -> {
+                return true;
+            }
+            case FERTIG -> {
+                try {
+                    heimGehen();
+                } catch (Exception ex) {
+                    Log.debug("Motor", "Einfuehrung, Heimweg: " + ex.getMessage());
+                }
+                if (tracker != null) tracker.resetIdleClock();
+                return true;
+            }
+            default -> {
+                return false;
+            }
+        }
+    }
+
     private long dialogGeprueftUm;
 
     /** Erzaehltext mit Weiter-Pfeil (Vorlage dialog_weiter) wegtippen; hoechstens alle 1,5 s nachsehen. */
@@ -2249,10 +2699,28 @@ public final class BotEngine {
             Mat screen = ctx.refresh();
             if (screen == null) { schlaf(800); continue; }
 
+            // 15.11. / X3A2: Captcha? Dann hier nichts klicken (das rote X waere sofort eine Kampfsperre). Die Zeit, die
+            // es offen ist, zaehlt nicht gegen die Frist.
+            long vorCaptcha = System.currentTimeMillis();
+            if (captchaPruefen(screen)) {
+                ende += System.currentTimeMillis() - vorCaptcha + 300;
+                continue;
+            }
+
             // In der Burg? Der "Map"-Knopf unten links ist ueberall in der Burg da.
             if (sichtbar(screen, "map_button") || sichtbar(screen, "map_button_alt")) {
                 Log.info("Motor", de.hustlebot.core.Sprache.t("The castle is reached.", "Die Burg ist erreicht."));
                 return true;
+            }
+
+            // Gebietskarte (Schwert-Stuetzpunkte, "Invasion!"; 20.11. nach der Arena): der "Map"-Knopf sieht dort aus wie in der
+            // Burg, zaehlt aber nicht als Burg (BotContext.visible). Von dort fuehrt der Knopf weiter zur Weltkarte, dann "Home".
+            if (ctx.gebietskarte(screen)
+                    && (klickWennDa(screen, "map_button", Sprache.t("Territory map: Map button (to the castle)", "Gebietskarte: Map-Knopf (zur Burg)"))
+                    || klickWennDa(screen, "map_button_alt", Sprache.t("Territory map: Map button (to the castle)", "Gebietskarte: Map-Knopf (zur Burg)")))) {
+                unbekannt = 0;
+                ctx.sleepUntilChanged(1500);
+                continue;
             }
 
             // Auf der Weltkarte? Dort fuehrt "Home" unten links in die Burg.
@@ -2384,6 +2852,17 @@ public final class BotEngine {
         return true;
     }
 
+    /** Hintergrund-Modus (Autor 20.11.): Autor hat das Spiel geoeffnet -- pausieren. true = jetzt pausiert. */
+    public synchronized boolean pausierenFuerAutor() {
+        if (state != State.LAEUFT || paused) return false;
+        paused = true;
+        modusPauseUm = 0;
+        String t = de.hustlebot.core.Sprache.t("Paused (you opened the game).", "Pausiert (du hast das Spiel geoeffnet).");
+        setState(State.PAUSIERT, t);
+        Log.info("Motor", t);
+        return true;
+    }
+
     /** Weiter durch die Mauswache nach 5 min Ruhe. true = jetzt fortgesetzt. */
     public synchronized boolean fortsetzenOhneAutor() {
         if (state != State.PAUSIERT) return false;
@@ -2415,6 +2894,16 @@ public final class BotEngine {
         State alt = this.state;
         this.state = newState;
         this.statusText = text;
+
+        // Hintergrund-Modus (Autor 20.11.): !stop -> Spiel wieder sichtbar; laeuft der Bot wieder -> wieder unsichtbar.
+        if (newState != alt) {
+            try {
+                if (newState == State.GESTOPPT) de.hustlebot.core.Hintergrund.nachStopp();
+                else if (newState == State.LAEUFT) de.hustlebot.core.Hintergrund.botLaeuft();
+            } catch (Throwable ignored) {
+                // der Hintergrund-Modus darf den Motor nie stoeren
+            }
+        }
 
         // Pausenzeit aus der Laufzeit herausrechnen -- egal, ob per !pause
         // oder weil der Bot selbst auf einen Menschen wartet.
@@ -2533,6 +3022,8 @@ public final class BotEngine {
             return GameMode.Outcome.ACTED;
         }
         String wo = activeMode.displayName();
+        // Autor 21.11.: "Congratulations! ... See your mailbox" -- Go to mailbox, Mailbox gleich wieder zu, weiter.
+        if (Stoerfenster.glueckwunschMailbox(screen, ctx, wo)) return GameMode.Outcome.ACTED;
         if (Stoerfenster.afkUpdate(screen, ctx, wo)) return GameMode.Outcome.ACTED;
         if ("cathedral".equals(activeMode.id())) return null;
         switch (Stoerfenster.anderesGeraet(screen, ctx, wo)) {

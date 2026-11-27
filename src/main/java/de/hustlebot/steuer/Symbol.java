@@ -16,7 +16,7 @@ public final class Symbol implements Icon {
 
     public enum Art {
         START, PAUSE, WEITER, STOPP, NOTAUS, LISTE, KREISLAUF, NEUSTART, AUS, KREUZ, LUPE, MIKRO,
-        PFEIL_UNTEN, HAKEN, NEU, ORDNER, STERN, FENSTER, PUNKT
+        PFEIL_UNTEN, PFEIL_OBEN, HAKEN, NEU, ORDNER, STERN, FENSTER, PUNKT
     }
 
     private final Art art;
@@ -109,6 +109,14 @@ public final class Symbol implements Icon {
                 p.moveTo(s * 0.15, s * 0.3);
                 p.lineTo(s * 0.85, s * 0.3);
                 p.lineTo(s * 0.5, s * 0.78);
+                p.closePath();
+                g2.fill(p);
+            }
+            case PFEIL_OBEN -> {   // Warteschlange 15.11.: Zeile nach oben
+                Path2D p = new Path2D.Float();
+                p.moveTo(s * 0.15, s * 0.7);
+                p.lineTo(s * 0.85, s * 0.7);
+                p.lineTo(s * 0.5, s * 0.22);
                 p.closePath();
                 g2.fill(p);
             }

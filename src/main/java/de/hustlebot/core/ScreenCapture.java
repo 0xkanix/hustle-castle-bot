@@ -18,14 +18,27 @@ import java.io.IOException;
 public final class ScreenCapture {
 
     private final Robot robot;
+    /** Handy-Umbau 19.11.: ist das gesetzt, kommen die Fotos von dort (z. B. ADB) statt vom PC-Bildschirm. */
+    private final Steuerung steuerung;
+
+    public ScreenCapture(Steuerung steuerung) {
+        this.robot = null;
+        this.steuerung = steuerung;
+    }
 
     public ScreenCapture() throws AWTException {
+        this.steuerung = null;
         this.robot = new Robot();
         this.robot.setAutoWaitForIdle(false);
     }
 
     public BufferedImage grab(Rectangle area) {
-        return robot.createScreenCapture(area);
+        long start = System.nanoTime();
+        BufferedImage bild = steuerung != null ? steuerung.foto(area) : robot.createScreenCapture(area);
+        // VM-Auge (20.11.): einmal je Minute "Fotozeit: ..." ins Protokoll, siehe Fotozeit.
+        String zeile = Fotozeit.BOT.merke(System.nanoTime() - start, System.currentTimeMillis());
+        if (zeile != null) Log.debug("Foto", zeile);
+        return bild;
     }
 
     /**

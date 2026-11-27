@@ -403,8 +403,11 @@ public final class LighthouseMode implements GameMode {
                     ctx.sleepUntilChanged(1200);
                     return Outcome.ACTED;
                 }
-            } else if (ctx.clickIfVisibleIfKnown(screen, ort.auswahl(), wo + " waehlen")) {
+            } else if (ctx.clickIfVisibleIfKnown(screen, ort.auswahl(), Sprache.t("Select " + ort.en(), wo + " waehlen"))) {
                 auswahlGeklickt = true;
+                // Konrad 20.11. (Y9JU, VLD8, BUX9): Weg dorthin meldete keinen Fortschritt -- auf einem langsamen PC laedt die
+                // Liste danach ~6 s, und nach 20 s ab "Start" kam ein Haenger-Bericht, obwohl alles lief.
+                runs.progress(Sprache.t(ort.en() + " selected", wo + " gewaehlt"));
                 ctx.sleepUntilChanged(1500);
                 return Outcome.ACTED;
             }
@@ -435,10 +438,11 @@ public final class LighthouseMode implements GameMode {
         // --- 4. Weltkarte mit dem Ort -------------------------------------
         boolean ortZuSehen = ctx.visibleIfKnown(screen, ort.node());
         if (!fertig && ortZuSehen
-                && ctx.clickIfVisibleIfKnown(screen, ort.node(), wo + " oeffnen")) {
+                && ctx.clickIfVisibleIfKnown(screen, ort.node(), Sprache.t("Open " + ort.en(), wo + " oeffnen"))) {
             blind = 0;
             ortGeklicktUm = jetzt;
             if (karteGeklicktUm > 0) GEMERKTE_ZUEGE.put(ort.de(), wischer);   // Autor 24.10. (Ideenliste A17)
+            runs.progress(Sprache.t(ort.en() + " opened", wo + " geoeffnet"));
             ctx.sleepUntilChanged(1500);
             return Outcome.ACTED;
         }
@@ -458,6 +462,7 @@ public final class LighthouseMode implements GameMode {
                     || ctx.clickIfVisibleIfKnown(screen, T_MAP, de.hustlebot.core.Sprache.t("Open the world map (", "Weltkarte oeffnen (") + wo + ")")) {
                 karteGeklicktUm = jetzt;
                 wischer = 0;
+                runs.progress(Sprache.t("World map opened", "Weltkarte geoeffnet"));   // Konrad 20.11. (LT6E)
                 ctx.sleepUntilChanged(1500);
                 return Outcome.ACTED;
             }
@@ -507,6 +512,7 @@ public final class LighthouseMode implements GameMode {
                 }
                 Log.action("Karte", Sprache.t("Dragging the world map " + gemerkt + " times in a row like last time (to " + wo + ").",
                         "Weltkarte " + gemerkt + " Mal hintereinander gezogen wie beim letzten Mal (zu " + wo + ")."));
+                runs.progress(Sprache.t("World map dragged", "Weltkarte gezogen"));
                 ctx.sleepUntilChanged(400);
                 return Outcome.ACTED;
             }
@@ -521,6 +527,8 @@ public final class LighthouseMode implements GameMode {
                         + MAX_WISCHER + ").");
                 if (nachRechts) ctx.input().drag(links, y, rechts, y);
                 else ctx.input().drag(rechts, y, links, y);
+                // Hoechstens MAX_WISCHER Zuege, dann "nicht gefunden" -- das Ziehen kann also nichts endlos verdecken.
+                runs.progress(Sprache.t("World map dragged", "Weltkarte gezogen"));   // Konrad 20.11. (LT6E)
                 ctx.sleepUntilChanged(400);
                 return Outcome.ACTED;
             }
@@ -529,7 +537,7 @@ public final class LighthouseMode implements GameMode {
                     wo + " wurde auf der Weltkarte nicht gefunden. "
                     + "Passt die Vorlage " + ort.node() + " noch?"));
             fertig = true;
-            ort.plan().naechsterBesuchIn(Energieplan.NICHT_VOLL_MIN, Sprache.t(wo + " not found.", wo + " nicht gefunden."));
+            ort.plan().naechsterBesuchIn(Energieplan.NICHT_VOLL_MIN, Sprache.t(ort.en() + " not found.", wo + " nicht gefunden."));
             return heimVonDerKarte(screen, ctx);
         }
 
@@ -592,7 +600,7 @@ public final class LighthouseMode implements GameMode {
             runs.progress(de.hustlebot.core.Sprache.t("Fight " + kaempfe + " done", "Kampf " + kaempfe + " fertig"));
         }
         blind = 0;
-        boolean geklickt = ctx.clickIfVisibleIfKnown(screen, T_HOME, wo + ": Kampfergebnis bestaetigen");
+        boolean geklickt = ctx.clickIfVisibleIfKnown(screen, T_HOME, displayName() + Sprache.t(": confirm the fight result", ": Kampfergebnis bestaetigen"));
         // Autor 24.10. (Ideenliste A16): Pause nach dem Bestaetigen war 0,4-0,5 s (Bildwechsel abwarten, ganzer Schritt mit
         // allen Fehlsuchen). Jetzt: per Kastenblick warten, bis die Liste wieder steht (Titel da, Bild nicht dunkel), und
         // gleich auf "To battle!" -- mit demselben Code und denselben Sicherungen (roter Blitz, Energie, dunkles Fenster) wie
@@ -709,7 +717,7 @@ public final class LighthouseMode implements GameMode {
             return Outcome.WAITING;
         }
         if (!fertig && kaempfe < erlaubt) {
-            if (ctx.clickIfVisibleIfKnown(screen, ort.quick(), wo + ": Quick Attack")) {
+            if (ctx.clickIfVisibleIfKnown(screen, ort.quick(), displayName() + ": Quick Attack")) {
                 kampfLaeuft = true;
                 kaempfe++;
                 quickGeklicktUm = jetzt;
@@ -718,7 +726,7 @@ public final class LighthouseMode implements GameMode {
             }
         }
         // Hier nicht kaempfen (keine Energie mehr, Besuch vorbei): Fenster zu.
-        if (ctx.clickIfVisibleIfKnown(screen, T_X, wo + Sprache.t(": close the squad window", ": Aufstellung schliessen"))) {
+        if (ctx.clickIfVisibleIfKnown(screen, T_X, displayName() + Sprache.t(": close the squad window", ": Aufstellung schliessen"))) {
             ctx.sleepUntilChanged(800);
             return Outcome.ACTED;
         }
@@ -835,7 +843,7 @@ public final class LighthouseMode implements GameMode {
         if (fertig) {
             // Leuchtturm: rotes X. Kolosseum: kein X, "Home" unten links
             // (Autor, 26.09.: landet dann auf der Weltkarte).
-            if (ort.mitX() && ctx.clickIfVisibleIfKnown(screen, T_X, wo + " verlassen")) {
+            if (ort.mitX() && ctx.clickIfVisibleIfKnown(screen, T_X, Sprache.t("Leave " + ort.en(), wo + " verlassen"))) {
                 ctx.sleepUntilChanged(1200);
                 return Outcome.ACTED;
             }
@@ -887,7 +895,7 @@ public final class LighthouseMode implements GameMode {
                         spaehZeile = k.centerY();
                         spaehSchritte = 0;
                         nullSchonGesehen = false;
-                        Log.action("Klick", Sprache.t(wo + ": look at the enemy, read the power  [" + k.centerX() + "," + k.centerY() + "]",
+                        Log.action("Klick", Sprache.t(ort.en() + ": look at the enemy, read the power  [" + k.centerX() + "," + k.centerY() + "]",
                                 wo + ": Gegner ansehen, Staerke ablesen  ["
                                 + k.centerX() + "," + k.centerY() + "]"));
                         ctx.input().click(k);
@@ -898,7 +906,7 @@ public final class LighthouseMode implements GameMode {
                 if (gewaehlt == null) return Outcome.ACTED;   // Refresh gedrueckt
                 ziel = gewaehlt;
             }
-            Log.action("Klick", wo + de.hustlebot.core.Sprache.t(": To battle (fight ", ": To battle (Kampf ") + (kaempfe + 1) + ")  ["
+            Log.action("Klick", displayName() + de.hustlebot.core.Sprache.t(": To battle (fight ", ": To battle (Kampf ") + (kaempfe + 1) + ")  ["
                     + ziel.centerX() + "," + ziel.centerY() + "]");
             kampfZeile = ziel.centerY();
             spaehZeile = null;   // hier wird gekaempft, nichts mehr angesehen
@@ -964,7 +972,7 @@ public final class LighthouseMode implements GameMode {
         }
         String was = claim ? Sprache.t(": contest over -- claim the reward", ": Wettbewerb vorbei -- Belohnung abholen (Claim reward)")
                            : Sprache.t(": close the contest window", ": Wettbewerbsfenster schliessen (Close)");
-        if (!ctx.clickIfVisibleIfKnown(screen, claim ? T_CLAIM : T_WETTBEWERB_ZU, ort.de() + was)) return null;
+        if (!ctx.clickIfVisibleIfKnown(screen, claim ? T_CLAIM : T_WETTBEWERB_ZU, displayName() + was)) return null;
         if (claim) Log.info(ort.de(), Sprache.t("The contest is over -- reward claimed. Then the usual fights.",
                 "Der Wettbewerb ist vorbei -- Belohnung abgeholt. Danach die gewohnten Kaempfe."));
         wettbewerbKlickUm = jetzt;
@@ -1023,11 +1031,11 @@ public final class LighthouseMode implements GameMode {
                 var p = powerLesen(screen, ctx);
                 if (p.isPresent()) {
                     meinePower = p.getAsLong();
-                    Log.info(wo, "Meine Power: " + String.format("%,d", meinePower).replace(',', ' ') + ".");
+                    Log.info(wo, Sprache.t("My power: ", "Meine Power: ") + String.format("%,d", meinePower).replace(',', ' ') + ".");
                 }
             }
             if (powerBei(spaehZeile) == null) {
-                ctx.clickIfVisibleIfKnown(screen, T_TAB_GEGNER, wo + Sprache.t(": tab \"Enemy squad\"", ": Reiter \"Enemy squad\""));
+                ctx.clickIfVisibleIfKnown(screen, T_TAB_GEGNER, displayName() + Sprache.t(": tab \"Enemy squad\"", ": Reiter \"Enemy squad\""));
                 ctx.sleepUntilChanged(800);
                 return Outcome.ACTED;
             }
@@ -1054,7 +1062,7 @@ public final class LighthouseMode implements GameMode {
                         + String.format("%,d", p.getAsLong()).replace(',', ' ') + "."));
             }
             if (meinePower < 0 && meineLeseVersuche < 3) {
-                ctx.clickIfVisibleIfKnown(screen, T_TAB_ICH, wo + Sprache.t(": tab \"Your squad\"", ": Reiter \"Your squad\""));
+                ctx.clickIfVisibleIfKnown(screen, T_TAB_ICH, displayName() + Sprache.t(": tab \"Your squad\"", ": Reiter \"Your squad\""));
                 ctx.sleepUntilChanged(800);
                 return Outcome.ACTED;
             }
@@ -1097,13 +1105,13 @@ public final class LighthouseMode implements GameMode {
                 var p = powerLesen(f, ctx);
                 if (p.isPresent()) {
                     meinePower = p.getAsLong();
-                    Log.info(wo, "Meine Power: " + String.format("%,d", meinePower).replace(',', ' ') + ".");
+                    Log.info(wo, Sprache.t("My power: ", "Meine Power: ") + String.format("%,d", meinePower).replace(',', ' ') + ".");
                 }
             }
             // Ohne meine Power waere "Zahl gleich meiner Power" (Reiter noch nicht umgeschaltet) nicht zu erkennen: dann
             // macht spaehen() es wie bisher (liest erst meine Power, dann den Gegner).
             if (meinePower < 0) return Outcome.ACTED;
-            ctx.klick(reiter.get(), wo + Sprache.t(": tab \"Enemy squad\"", ": Reiter \"Enemy squad\""));
+            ctx.klick(reiter.get(), displayName() + Sprache.t(": tab \"Enemy squad\"", ": Reiter \"Enemy squad\""));
             if (ctx.warteAufKnopf(SPAEH_FENSTER_MS, Matcher.DEFAULT_THRESHOLD, T_TAB_ICH).isEmpty()) return Outcome.ACTED;
             ctx.sleep(tempo.ms(80));   // die Zahl blendet vielleicht noch ein
         }
@@ -1132,7 +1140,7 @@ public final class LighthouseMode implements GameMode {
                 "Gegner in Zeile " + zeile + ": Power " + String.format("%,d", wert).replace(',', ' ') + "."));
         // Meine Power fehlt noch? Dann liest spaehen() sie ueber den Reiter "Your squad".
         if (meinePower < 0 && meineLeseVersuche < 3) return Outcome.ACTED;
-        if (!ctx.clickIfVisibleIfKnown(f, T_X, wo + Sprache.t(": close the enemy window (only looked at)",
+        if (!ctx.clickIfVisibleIfKnown(f, T_X, displayName() + Sprache.t(": close the enemy window (only looked at)",
                 ": Gegner-Fenster schliessen (nur angesehen)"))) {
             return Outcome.ACTED;
         }
@@ -1149,7 +1157,7 @@ public final class LighthouseMode implements GameMode {
     }
 
     private Outcome spaehSchliessen(Mat screen, BotContext ctx) {
-        if (ctx.clickIfVisibleIfKnown(screen, T_X, ort.de() + Sprache.t(": close the enemy window (only looked at)", ": Gegner-Fenster schliessen (nur angesehen)"))) {
+        if (ctx.clickIfVisibleIfKnown(screen, T_X, displayName() + Sprache.t(": close the enemy window (only looked at)", ": Gegner-Fenster schliessen (nur angesehen)"))) {
             spaehZeile = null;
             ctx.sleepUntilChanged(800);
             return Outcome.ACTED;
@@ -1264,8 +1272,8 @@ public final class LighthouseMode implements GameMode {
         var knopf = ctx.matcher().find(screen, ort.refresh(), Matcher.DEFAULT_THRESHOLD);
         if (knopf.isEmpty() || diamantImKnopf(screen, knopf.get())) return false;
         Matcher.Hit k = knopf.get();
-        Log.action("Klick", ort.de() + ": " + grund + " -- Refresh (kostenlos)  [" + k.centerX() + ","
-                + k.centerY() + String.format(", Uebereinstimmung %.3f]", k.score()));
+        Log.action("Klick", displayName() + ": " + grund + Sprache.t(" -- Refresh (free)  [", " -- Refresh (kostenlos)  [") + k.centerX() + ","
+                + k.centerY() + String.format(Sprache.t(", match %.3f]", ", Uebereinstimmung %.3f]"), k.score()));
         ctx.input().click(k);
         refreshs++;
         letzterRefreshUm = jetzt;

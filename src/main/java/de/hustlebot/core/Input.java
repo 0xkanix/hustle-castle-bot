@@ -12,7 +12,7 @@ import java.util.Random;
  */
 public final class Input {
 
-    private final Robot robot;
+    private final Steuerung st;
     private final Random random = new Random();
     private final Humanizer human;
     private Laufstatistik laufstatistik;
@@ -23,8 +23,17 @@ public final class Input {
     }
 
     public Input(Robot robot, Humanizer human) {
-        this.robot = robot;
+        this(new RobotSteuerung(robot), human);
+    }
+
+    /** Handy-Umbau 19.11.: beliebige Steuerung (am PC RobotSteuerung wie bisher, am Handy AdbSteuerung). */
+    public Input(Steuerung st, Humanizer human) {
+        this.st = st;
         this.human = human;
+    }
+
+    public Steuerung steuerung() {
+        return st;
     }
 
     public Humanizer humanizer() {
@@ -83,9 +92,178 @@ public final class Input {
 
         moveSmoothly(screenX, screenY);
         pause(human.reactionDelay() + 6 + random.nextInt(10) + ruheVorherMs);
-        robot.mousePress(InputEvent.BUTTON1_DOWN_MASK);
+        st.druecken();
         pause(druckMs > 0 ? druckMs : 18 + random.nextInt(14));   // lang genug, dass das Spiel den Klick sieht
-        robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK);
+        st.loslassen();
+    }
+
+    /**
+     * Langer Klick (Autor 18.11.): ohne Streuung, Druecken, haltMs halten, Loslassen. Das Spiel nimmt
+     * kurze Klicks dort oft nicht an; gemessen klappt 120 ms immer.
+     */
+    public void klickLang(int relX, int relY, int haltMs) {
+        if (clientArea == null) return;
+        int lx = clamp(relX, 0, clientArea.width - 1);
+        int ly = clamp(relY, 0, clientArea.height - 1);
+        if (laufstatistik != null) laufstatistik.recordClick(lx, ly);
+        moveSmoothly(clientArea.x + lx, clientArea.y + ly);
+        pause(human.reactionDelay() + 6 + random.nextInt(10) + ruheVorherMs);
+        st.druecken();
+        pause(Math.max(20, haltMs));
+        st.loslassen();
+    }
+
+    // ---- Weiche Bewegungen (getestet 18.11.). Bewegt ein Mensch die Maus (Mauswache), wird sofort aufgehoert und
+    //      losgelassen.
+
+    /** Gleitzeit beim Ziehen: 220 ms + 0,45 ms je Bildpunkt Weg, hoechstens 520 ms. */
+    public static int gleitMs(int fromX, int fromY, int toX, int toY) {
+        return (int) Math.min(520, 220 + Math.hypot(toX - fromX, toY - fromY) * 0.45);
+    }
+
+    /**
+     * Tippen: in ~180 ms weich hinfahren (ease-in-out), 60 ms ruhen, druckMs druecken (110 ms klappt immer), loslassen.
+     * false = abgebrochen, weil ein Mensch die Maus bewegt hat (dann wurde NICHT gedrueckt).
+     */
+    public boolean tippWeich(int relX, int relY, int druckMs) {
+        if (clientArea == null) return false;
+        int lx = clamp(relX, 0, clientArea.width - 1);
+        int ly = clamp(relY, 0, clientArea.height - 1);
+        if (!gleiteWeich(clientArea.x + lx, clientArea.y + ly, 180)) return abgebrochen("Tippen");
+        if (laufstatistik != null) laufstatistik.recordClick(lx, ly);
+        pause(60);
+        st.druecken();
+        try {
+            pause(Math.max(20, druckMs));
+        } finally {
+            st.loslassen();
+        }
+        return true;
+    }
+
+    /**
+     * Ziehen (Zusammenlegen): weich zur Quelle (200 ms), 50 ms ruhen, druecken, haltStartMs halten, in gleitMs weich zum
+     * Ziel gleiten, haltEndeMs ueber dem Ziel halten, loslassen. false = abgebrochen (Maus bewegt; die Taste ist los).
+     */
+    public boolean ziehenWeich(int fromX, int fromY, int toX, int toY, int haltStartMs, int gleitMs, int haltEndeMs) {
+        if (clientArea == null) return false;
+        int x1 = clientArea.x + clamp(fromX, 0, clientArea.width - 1), y1 = clientArea.y + clamp(fromY, 0, clientArea.height - 1);
+        int x2 = clientArea.x + clamp(toX, 0, clientArea.width - 1), y2 = clientArea.y + clamp(toY, 0, clientArea.height - 1);
+        if (!gleiteWeich(x1, y1, 200)) return abgebrochen("Ziehen");
+        pause(50);
+        st.druecken();
+        try {
+            pause(Math.max(20, haltStartMs));
+            if (!gleiteWeich(x2, y2, Math.max(80, gleitMs))) return abgebrochen("Ziehen");
+            pause(Math.max(20, haltEndeMs));
+        } finally {
+            st.loslassen();   // nie gedrueckt haengen lassen
+        }
+        return true;
+    }
+
+    /** Ruhe nach einem Sofort-Sprung, bevor gedrueckt wird (etwa ein Bild des Spiels bei 60 Hz). */
+    static final int SPRUNG_RUHE_MS = 18;
+
+    /**
+     * Sofort-Sprung (Autor 21.11.: "keine Insta-Clicks?" -- Knoepfe sofort statt Gleiten): die Maus springt
+     * hin, SPRUNG_RUHE_MS Ruhe, dann wird geprueft, ob ein Mensch die Maus bewegt hat (die Mauswache kennt die neue
+     * Bot-Stelle schon -- ein Sprung zaehlt nie als Mensch). false = abgebrochen.
+     */
+    private boolean springe(int x, int y) {
+        bewege(x, y);
+        pause(SPRUNG_RUHE_MS);
+        return !zeigerWeg();
+    }
+
+    /**
+     * Knopf sofort tippen: hinspringen, kurz ruhen, druckMs druecken (110 ms klappt immer), loslassen.
+     * false = abgebrochen, weil ein Mensch die Maus bewegt hat (dann wurde NICHT gedrueckt).
+     */
+    public boolean tippSofort(int relX, int relY, int druckMs) {
+        if (clientArea == null) return false;
+        int lx = clamp(relX, 0, clientArea.width - 1);
+        int ly = clamp(relY, 0, clientArea.height - 1);
+        if (!springe(clientArea.x + lx, clientArea.y + ly)) return abgebrochen("Tippen");
+        if (laufstatistik != null) laufstatistik.recordClick(lx, ly);
+        st.druecken();
+        try {
+            pause(Math.max(20, druckMs));
+        } finally {
+            st.loslassen();
+        }
+        return true;
+    }
+
+    /**
+     * Roboter-Tempo (KLICK-PROTOKOLL "Roboter-Tempo", gemessen 18.11. 20:54): in hinMs hinfahren (steht die Maus schon
+     * dort: gar nicht; hinMs <= 0: Sofort-Sprung), druckMs druecken, loslassen. Die Pause danach macht der Aufrufer.
+     * false = Maus bewegt (abgebrochen).
+     */
+    public boolean tippSchnell(int relX, int relY, int hinMs, int druckMs) {
+        if (clientArea == null) return false;
+        int x = clientArea.x + clamp(relX, 0, clientArea.width - 1), y = clientArea.y + clamp(relY, 0, clientArea.height - 1);
+        if (!schonDa(x, y) && !(hinMs <= 0 ? springe(x, y) : gleiteWeich(x, y, Math.max(10, hinMs)))) return abgebrochen("Tippen");
+        if (laufstatistik != null) laufstatistik.recordClick(x - clientArea.x, y - clientArea.y);
+        st.druecken();
+        try {
+            pause(Math.max(20, druckMs));
+        } finally {
+            st.loslassen();
+        }
+        return true;
+    }
+
+    /**
+     * Roboter-Tempo beim Ziehen: hinMs hinfahren, druecken, haltStartMs halten, gleitMs gleiten, haltEndeMs halten,
+     * loslassen (gemessen 18.11.: 30 / 30 / 70 / 30 ms, Pause danach 300 ms macht der Aufrufer). hinMs <= 0: zur Quelle
+     * springen (Sofort-Sprung), das Ziehen selbst gleitet immer (sonst nimmt das Spiel den Zug nicht an). false = abgebrochen.
+     */
+    public boolean ziehenSchnell(int fromX, int fromY, int toX, int toY, int hinMs, int haltStartMs, int gleitMs, int haltEndeMs) {
+        if (clientArea == null) return false;
+        int x1 = clientArea.x + clamp(fromX, 0, clientArea.width - 1), y1 = clientArea.y + clamp(fromY, 0, clientArea.height - 1);
+        int x2 = clientArea.x + clamp(toX, 0, clientArea.width - 1), y2 = clientArea.y + clamp(toY, 0, clientArea.height - 1);
+        if (!schonDa(x1, y1) && !(hinMs <= 0 ? springe(x1, y1) : gleiteWeich(x1, y1, Math.max(10, hinMs)))) return abgebrochen("Ziehen");
+        st.druecken();
+        try {
+            pause(Math.max(10, haltStartMs));
+            if (!gleiteWeich(x2, y2, Math.max(20, gleitMs))) return abgebrochen("Ziehen");
+            pause(Math.max(10, haltEndeMs));
+        } finally {
+            st.loslassen();   // nie gedrueckt haengen lassen
+        }
+        return true;
+    }
+
+    /** Steht der Zeiger schon (fast) genau dort? Dann muss nicht hingefahren werden. */
+    private boolean schonDa(int x, int y) {
+        Point p = st.zeiger();
+        return Math.abs(p.x - x) <= 1 && Math.abs(p.y - y) <= 1;
+    }
+
+    /** Weich gleiten (ease-in-out, alle ~10 ms ein Schritt). false = ein Mensch hat die Maus unterwegs bewegt. */
+    private boolean gleiteWeich(int zielX, int zielY, int ms) {
+        Point start = st.zeiger();
+        int schritte = Math.max(8, ms / 10);
+        for (int k = 1; k <= schritte; k++) {
+            // erst nach der ersten eigenen Bewegung pruefen (vorher kennt die Mauswache die Bot-Stelle evtl. nicht)
+            if (k > 1 && zeigerWeg()) return false;
+            double t = (double) k / schritte;
+            double e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+            bewege((int) Math.round(start.x + (zielX - start.x) * e), (int) Math.round(start.y + (zielY - start.y) * e));
+            pause(Math.max(1, ms / schritte));
+        }
+        return !zeigerWeg();
+    }
+
+    private static boolean abgebrochen(String was) {
+        Log.info("Eingabe", Sprache.t(was + " aborted -- the mouse was moved.", was + " abgebrochen -- die Maus wurde bewegt."));
+        return false;
+    }
+
+    /** Zug mit einstellbarer Schrittzahl und Haltezeiten: nach dem Druecken und vor dem Loslassen. */
+    public void ziehenMit(int fromX, int fromY, int toX, int toY, int schritte, int haltStartMs, int haltEndeMs) {
+        drag(fromX, fromY, toX, toY, Math.max(2, schritte), 60, Math.max(20, haltStartMs), Math.max(20, haltEndeMs), 120);
     }
 
     // Aus dem Hauptbot uebernommen (10.10., Freunde-Update: Titan-Grabung und !stigmas loeschen) --
@@ -125,7 +303,7 @@ public final class Input {
         int n = 0;
         while (n < anzahl && !Thread.currentThread().isInterrupted()) {
             // Hat ein Mensch die Maus weggezogen, sofort aufhoeren (Mauswache pausiert danach).
-            if (Mauswache.zeigerWeg()) {
+            if (zeigerWeg()) {
                 Log.info("Eingabe", Sprache.t("Continuous click aborted after " + n + " taps -- the mouse was moved.",
                         "Dauerklick nach " + n + " Tipps abgebrochen -- die Maus wurde bewegt."));
                 break;
@@ -142,10 +320,10 @@ public final class Input {
                 break;
             }
             try {
-                robot.mousePress(InputEvent.BUTTON1_DOWN_MASK);
+                st.druecken();
                 if (haltenMs > 0) pause(haltenMs);
             } finally {
-                robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK);   // nie gedrueckt haengen lassen (F9, Fehler)
+                st.loslassen();   // nie gedrueckt haengen lassen (F9, Fehler)
             }
             n++;
             if (pauseMs > 0) pause(pauseMs);
@@ -158,7 +336,7 @@ public final class Input {
     public double helligkeit(int relX, int relY, int breite, int hoehe) {
         if (clientArea == null || breite <= 0 || hoehe <= 0) return -1;
         try {
-            java.awt.image.BufferedImage b = robot.createScreenCapture(new Rectangle(clientArea.x + relX, clientArea.y + relY, breite, hoehe));
+            java.awt.image.BufferedImage b = st.foto(new Rectangle(clientArea.x + relX, clientArea.y + relY, breite, hoehe));
             long summe = 0;
             int n = 0;
             for (int y = 0; y < b.getHeight(); y += 2) {
@@ -190,9 +368,9 @@ public final class Input {
         if (laufstatistik != null) laufstatistik.recordClick(localX, localY);
         bewege(clientArea.x + localX, clientArea.y + localY);
         pause(8);
-        robot.mousePress(InputEvent.BUTTON1_DOWN_MASK);
+        st.druecken();
         pause(20);
-        robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK);
+        st.loslassen();
     }
 
     /** Zug ohne Hingleiten (Events, 09.10.): Maus springt zum Start, dann wenige schnelle Zwischenschritte. */
@@ -205,7 +383,7 @@ public final class Input {
         if (laufstatistik != null) laufstatistik.recordDrag(sx - clientArea.x, sy - clientArea.y, tx - clientArea.x, ty - clientArea.y);
         bewege(sx, sy);
         pause(15);
-        robot.mousePress(InputEvent.BUTTON1_DOWN_MASK);
+        st.druecken();
         pause(40);
         for (int i = 1; i <= 6; i++) {
             double t = i / 6.0;
@@ -213,7 +391,7 @@ public final class Input {
             pause(12);
         }
         pause(40);
-        robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK);
+        st.loslassen();
         pause(20);
     }
 
@@ -268,12 +446,12 @@ public final class Input {
 
         moveSmoothly(sx, sy);
         pause(120);
-        robot.mousePress(InputEvent.BUTTON1_DOWN_MASK);
+        st.druecken();
         pause(250);
         strecke(sx, sy, sx, ty, 40);
         strecke(sx, ty, tx, ty, 40);
         pause(1000);
-        robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK);
+        st.loslassen();
         pause(300);
     }
 
@@ -303,7 +481,7 @@ public final class Input {
 
         moveSmoothly(sx, sy);
         pause(vorDemDruecken);
-        robot.mousePress(InputEvent.BUTTON1_DOWN_MASK);
+        st.druecken();
         pause(nachDemDruecken);
 
         // In mehreren Schritten ziehen, sonst erkennt das Spiel die Bewegung nicht.
@@ -317,7 +495,7 @@ public final class Input {
         }
 
         pause(vorDemLoslassen);
-        robot.mouseRelease(InputEvent.BUTTON1_DOWN_MASK);
+        st.loslassen();
         pause(danach);
     }
 
@@ -327,7 +505,7 @@ public final class Input {
      * korrigiert nach, so wie es eine Hand tut.
      */
     private void moveSmoothly(int targetX, int targetY) {
-        Point start = MouseInfo.getPointerInfo().getLocation();
+        Point start = st.zeiger();
         int distance = (int) start.distance(targetX, targetY);
 
         if (distance > 180 && human.shouldOvershoot()) {
@@ -336,7 +514,7 @@ public final class Input {
             int overY = (int) Math.round(targetY + (targetY - start.y) * excess);
             glide(start, overX, overY, distance);
             pause(30 + random.nextInt(45));
-            glide(MouseInfo.getPointerInfo().getLocation(), targetX, targetY, 40);
+            glide(st.zeiger(), targetX, targetY, 40);
             return;
         }
         glide(start, targetX, targetY, distance);
@@ -383,11 +561,20 @@ public final class Input {
     }
     /** Jede Mausbewegung des Bots meldet sich bei der Mauswache (Autor 14.10.: Ablauf pausiert, wenn ein Mensch die Maus bewegt). */
     private void bewege(int x, int y) {
+        if (!st.istPcMaus()) {   // Handy: die PC-Maus bleibt, wo sie ist -- keine Mauswache
+            st.bewegen(x, y);
+            return;
+        }
         Mauswache.vorBotBewegung();
         Mauswache.botBewegt(x, y);
-        robot.mouseMove(x, y);
+        st.bewegen(x, y);
         Mauswache.botBewegt(x, y);
         Mauswache.botGemessen();   // Dirk 17.10.: Skalierung != 100 % -- gemessene Stelle mitmerken
+    }
+
+    /** Hat ein Mensch die PC-Maus bewegt? Am Handy gibt es keine Bot-Maus am PC -- dort nie. */
+    private boolean zeigerWeg() {
+        return st.istPcMaus() && Mauswache.zeigerWeg();
     }
 
 }

@@ -15,7 +15,7 @@ public final class Main {
     }
 
 
-    public static final String FASSUNG = "3.142";
+    public static final String FASSUNG = "3.166";
 
     /**
      * Wann diese Jar gebaut wurde ("21.10. 23:05"), "?" wenn unbekannt. Autor 21.10.: Ben und Mia liefen tagelang auf

@@ -85,14 +85,43 @@ public final class Kern {
             return;
         }
 
-        if (GraphicsEnvironment.isHeadless()) {
+        // Handy-Umbau 19.11.: liegt handy.txt im Bot-Ordner, spielt der Bot ueber ADB am Handy (ohne Datei: wie bisher).
+        de.hustlebot.core.Handyprofil handy = de.hustlebot.core.Handyprofil.laden(Ordner.basis());
+        de.hustlebot.core.AdbSteuerung handySteuerung = null;
+        if (handy != null) {
+            handySteuerung = new de.hustlebot.core.AdbSteuerung(handy.adb(), handy.geraet());
+            java.awt.image.BufferedImage erstes = handySteuerung.ganzesFoto();
+            if (erstes == null) {
+                Log.error("Start", "Handy (handy.txt): kein Bildschirmfoto ueber ADB -- ist das Handy verbunden "
+                        + "(adb connect, siehe doku\\handy\\ANLEITUNG-ADB.md)?");
+                warteAufTaste();
+                return;
+            }
+            GameWindow.probeFensterSetzen(new java.awt.Rectangle(0, 0, erstes.getWidth(), erstes.getHeight()));
+            vorlagenOrdner = Ordner.bei(handy.vorlagen());
+            Log.info("Start", "Handy-Betrieb: " + (handy.geraet() == null ? "einziges Geraet" : handy.geraet()) + ", Bildschirm "
+                    + erstes.getWidth() + "x" + erstes.getHeight() + ", Vorlagen " + vorlagenOrdner + ".");
+        } else if (GraphicsEnvironment.isHeadless()) {
             Log.error("Start", Sprache.t("No screen available.", "Kein Bildschirm vorhanden."));
             return;
         }
 
         try {
             GameWindow fenster = new GameWindow(fensterTitel, fensterBreite, fensterHoehe);
-            ScreenCapture kamera = new ScreenCapture();
+            // Hintergrund-Modus (EXPERIMENTELL, Autor 20.11.): mit hintergrund.txt "an" spielt der Bot unsichtbar --
+            // Fotos per PrintWindow, Tipps per Touch unter dem Mauszeiger. Ohne Datei: genau wie bisher (echte Maus,
+            // Bildschirmfoto). Umschalten geht im Lauf (die Datei wird alle 2 s gelesen).
+            de.hustlebot.core.HintergrundSteuerung hinten = handySteuerung != null ? null
+                    : new de.hustlebot.core.HintergrundSteuerung(new de.hustlebot.core.Geist.Zugang(fenster::handle));
+            ScreenCapture kamera;
+            if (handySteuerung != null) {
+                kamera = new ScreenCapture(handySteuerung);
+            } else {
+                Robot fotoRoboter = new Robot();
+                fotoRoboter.setAutoWaitForIdle(false);
+                kamera = new ScreenCapture(new de.hustlebot.core.WahlSteuerung(
+                        new de.hustlebot.core.RobotSteuerung(fotoRoboter), hinten, de.hustlebot.core.Hintergrund::an));
+            }
             // Autor 17.10.: sicher erkannte Knoepfe vom Bildschirm des Freundes aufnehmen (Matcher, eigene Vorlagen).
             Matcher.EIGEN_ORDNER = vorlagenOrdner.resolve("gelernt").resolve("eigen");
             // Autor 24.10.: eigene Aufnahmen + Arena-Listen sichtbar in "My pictures" (vorher templates\arena\gegner).
@@ -106,7 +135,9 @@ public final class Kern {
             mensch.setEnabled(false);
             mensch.setIntensity(0.0);
 
-            Input eingabe = new Input(new Robot(), mensch);
+            Input eingabe = handySteuerung != null ? new Input(handySteuerung, mensch)
+                    : new Input(new de.hustlebot.core.WahlSteuerung(new de.hustlebot.core.RobotSteuerung(new Robot()),
+                            hinten, de.hustlebot.core.Hintergrund::an), mensch);
 
             de.hustlebot.core.VorlagenNachschub.liefern(vorlagenOrdner);
             de.hustlebot.core.ReinigerNachschub.liefern();   // PC-Cleaner in den Bot-Ordner (07.10.)
@@ -171,6 +202,21 @@ public final class Kern {
             bruecke.notAusStarten(config.getProperty("notaus.taste", "F9"), configDatei);
             bruecke.notPauseStarten(config.getProperty("notpause.taste", "F10"), config.getProperty("weiter.taste", "F11"));
             if (!de.hustlebot.core.ServerSparsam.an()) bruecke.mauswacheStarten();
+            if (hinten != null) {
+                // Hintergrund-Wache: Autor oeffnet das Spiel -> Bot pausiert; Schalter aus -> Spiel wieder sichtbar.
+                de.hustlebot.core.Hintergrund.starten(() -> {
+                    if (motor.pausierenFuerAutor()) {
+                        discord.sendCard(Sprache.t("Paused (game opened)", "Pausiert (Spiel geoeffnet)"),
+                                Sprache.t("You opened the game -- background mode pauses. Type !resume when the bot should carry on.",
+                                        "Du hast das Spiel geoeffnet -- der Hintergrund-Modus pausiert. Tipp !resume, wenn der Bot weitermachen soll."),
+                                DiscordClient.FARBE_INFO);
+                    }
+                });
+                if (de.hustlebot.core.Hintergrund.an()) {
+                    Log.warn("Start", Sprache.t("Background mode is ON (hintergrund.txt) -- EXPERIMENTAL. Do not use it next to games with many clicks.",
+                            "Hintergrund-Modus ist AN (hintergrund.txt) -- EXPERIMENTELL. Nicht neben Spielen mit vielen Klicks benutzen."));
+                }
+            }
             de.hustlebot.bot.ArenaBeobachter.starten(motor);   // Autor 21.10.: eigene Arena-Kaempfe mitzaehlen
             // Autor 28.10.: nur mit arena-schicht.txt "an"; Kommentare/Zustimmen/Ablehnen gehen auch nach Discord.
             de.hustlebot.schicht.ArenaSchicht.starten(fensterTitel, discord::send);
@@ -187,6 +233,11 @@ public final class Kern {
 
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 Log.info("Ende", Sprache.t("The bot is shutting down.", "Der Bot wird beendet."));
+                // Hintergrund-Modus: nie einen Finger liegen und nie das Spiel unsichtbar zuruecklassen.
+                if (hinten != null) {
+                    hinten.aufraeumen();
+                    de.hustlebot.core.Hintergrund.beimEnde();
+                }
                 bruecke.stop();
             }));
 

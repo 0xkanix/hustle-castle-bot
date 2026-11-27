@@ -81,32 +81,158 @@ public final class PaddleLeser {
     }
 
     private static final Map<Schrift, Modell> MODELLE = new EnumMap<>(Schrift.class);
+    /** Modelle, die fehlen oder nicht laden -- wird nicht bei jedem Lesen neu versucht (wie frueher: einmal je Start). */
+    private static final java.util.Set<Schrift> UNBRAUCHBAR = java.util.EnumSet.noneOf(Schrift.class);
     private static OrtEnvironment env;
     private static Boolean da;   // null = noch nicht versucht
 
-    /** Ist PaddleOCR einsatzbereit (mindestens das lateinische Modell)? Laedt beim ersten Aufruf (~0,1 s je Modell). */
+    // ------------------------------------------------------------------
+    //  Sparsam (Autor 20.11.: Bot laeuft kuenftig in einer VM neben Minecraft)
+    // ------------------------------------------------------------------
+    //
+    // Gemessen 20.11. (PaddleLeserSparsamTest): ALLE zehn Modelle beim ersten Lesen zu laden kostete 1,6 s und
+    // +357 MB Privatspeicher -- auch wenn der Bot danach nur Latein liest oder (Kathedrale) gar nichts mehr. Jetzt:
+    //   - ein Modell wird erst geladen, wenn es zum ersten Mal gebraucht wird (Latein gleich in verfuegbar());
+    //   - nach LEERLAUF_MS ohne jedes Lesen werden alle Modelle wieder freigegeben (Leerlauf), beim naechsten Lesen
+    //     laedt das gebrauchte Modell neu (~0,1 s);
+    //   - dieselbe Zeile (gleiche Bildpunkte, gleiches Modell) wird nicht zweimal gerechnet (GEDAECHTNIS).
+    // Gelesen wird genau wie vorher: gleiche Modelle, gleiche Reihenfolge, gleiche Rechnung.
+
+    /** Beim Rechnen Lesesperre, beim Freigeben Schreibsperre -- nie ein Modell schliessen, das gerade rechnet. */
+    private static final java.util.concurrent.locks.ReentrantReadWriteLock NUTZUNG = new java.util.concurrent.locks.ReentrantReadWriteLock();
+    private static volatile long zuletztGenutzt = System.currentTimeMillis();
+
+    /** So lange ohne Lesen, dann werden die Modelle freigegeben. */
+    static final long LEERLAUF_MS = 10 * 60_000L;
+
+    /** Ist PaddleOCR einsatzbereit (mindestens das lateinische Modell)? Laedt beim ersten Aufruf das lateinische Modell. */
     public static synchronized boolean verfuegbar() {
         if (da != null) return da;
         try {
             Onnxnativ.vorbereiten();
             env = OrtEnvironment.getEnvironment();
-            for (Schrift s : Schrift.values()) {
-                // 28.10.: je Modell abgesichert -- ein Modell, das nicht laedt, nimmt den anderen nicht alles weg
-                try {
-                    Modell m = laden(s);
-                    if (m != null) MODELLE.put(s, m);
-                } catch (Throwable t) {
-                    Log.info("Text", "PaddleOCR-Modell " + s + " nicht nutzbar: " + t);
-                }
-            }
-            da = MODELLE.containsKey(Schrift.LATEIN);
-            Log.info("Text", Sprache.t("PaddleOCR: " + (da ? "ready, models " + MODELLE.keySet() : "not available -- Windows text recognition as before") + ".",
-                    "PaddleOCR: " + (da ? "bereit, Modelle " + MODELLE.keySet() : "nicht da -- Windows-Texterkennung wie bisher") + "."));
+            da = modell(Schrift.LATEIN) != null;
+            Log.info("Text", Sprache.t("PaddleOCR: " + (da ? "ready, models load when first needed (" + Arrays.toString(Schrift.values()) + ")" : "not available -- Windows text recognition as before") + ".",
+                    "PaddleOCR: " + (da ? "bereit, Modelle laden beim ersten Gebrauch (" + Arrays.toString(Schrift.values()) + ")" : "nicht da -- Windows-Texterkennung wie bisher") + "."));
+            if (da) Leerlauf.beobachten();
         } catch (Throwable t) {
             da = false;
             Log.info("Text", "PaddleOCR nicht nutzbar: " + t);
+            Onnxnativ.laufzeitMelden(t);
         }
         return da;
+    }
+
+    /** Das Modell dieser Schrift, beim ersten Gebrauch (oder nach dem Freigeben) geladen; null = fehlt/laedt nicht. */
+    private static synchronized Modell modell(Schrift s) {
+        Modell m = MODELLE.get(s);
+        if (m != null || env == null || UNBRAUCHBAR.contains(s)) return m;
+        long t0 = System.nanoTime();
+        try {
+            // 28.10.: je Modell abgesichert -- ein Modell, das nicht laedt, nimmt den anderen nicht alles weg
+            m = laden(s);
+        } catch (Throwable t) {
+            Log.info("Text", "PaddleOCR-Modell " + s + " nicht nutzbar: " + t);
+            m = null;
+        }
+        if (m == null) {
+            UNBRAUCHBAR.add(s);
+            return null;
+        }
+        MODELLE.put(s, m);
+        LADUNGEN.incrementAndGet();
+        Log.debug("Text", "PaddleOCR-Modell " + s + " geladen (" + (System.nanoTime() - t0) / 1_000_000 + " ms).");
+        return m;
+    }
+
+    /** Gibt es das Modell (laedt es bei Bedarf)? Ersetzt das fruehere "ist geladen" -- frueher war immer alles geladen. */
+    static boolean hat(Schrift s) {
+        return modell(s) != null;
+    }
+
+    /** Welche Modelle gerade im Speicher liegen (fuer Bericht und Test). */
+    static synchronized java.util.Set<Schrift> geladen() {
+        return java.util.EnumSet.copyOf(MODELLE.isEmpty() ? java.util.EnumSet.noneOf(Schrift.class) : MODELLE.keySet());
+    }
+
+    /**
+     * Alle Modelle schliessen, wenn seit {@code nachMs} nichts gelesen wurde. Rechnet gerade jemand, bleibt alles (der
+     * naechste Blick des Leerlauf-Fadens kommt bald). true = freigegeben.
+     */
+    static boolean freigebenWennUnbenutzt(long jetzt, long nachMs) {
+        if (jetzt - zuletztGenutzt < nachMs) return false;
+        if (!NUTZUNG.writeLock().tryLock()) return false;
+        try {
+            synchronized (PaddleLeser.class) {
+                if (MODELLE.isEmpty()) return false;
+                java.util.Set<Schrift> welche = java.util.EnumSet.copyOf(MODELLE.keySet());
+                for (Modell m : MODELLE.values()) {
+                    try {
+                        m.sitzung().close();
+                    } catch (Exception e) {
+                        Log.debug("Text", "PaddleOCR-Modell nicht sauber geschlossen: " + e.getMessage());
+                    }
+                }
+                MODELLE.clear();
+                GEDAECHTNIS.clear();
+                Log.info("Text", Sprache.t("Text recognition unused for " + (jetzt - zuletztGenutzt) / 60_000 + " min -- models "
+                        + welche + " released (memory free; they load again when needed).",
+                        "Texterkennung " + (jetzt - zuletztGenutzt) / 60_000 + " min nicht gebraucht -- Modelle " + welche
+                        + " freigegeben (Speicher frei; sie laden bei Bedarf neu)."));
+                return true;
+            }
+        } finally {
+            NUTZUNG.writeLock().unlock();
+        }
+    }
+
+    // ------------------------------------------------------------------
+    //  Gedaechtnis: dieselbe Zeile nicht zweimal rechnen
+    // ------------------------------------------------------------------
+
+    /** Schluessel: Modell, Groesse und 64-Bit-Fingerabdruck der Bildpunkte. */
+    private record Schluessel(Schrift schrift, int breite, int hoehe, long abdruck) { }
+
+    /** So viele Lesungen werden gemerkt (je ein kurzer Text -- wenige KB zusammen). */
+    static final int GEDAECHTNIS_GROESSE = 512;
+
+    private static final Map<Schluessel, Lesung> GEDAECHTNIS = java.util.Collections.synchronizedMap(
+            new java.util.LinkedHashMap<>(64, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<Schluessel, Lesung> e) {
+                    return size() > GEDAECHTNIS_GROESSE;
+                }
+            });
+
+    /** FNV-1a ueber alle Bildpunkte (ohne Alphakanal). Kosten: ~0,05 ms fuer eine Namenszeile. */
+    static long abdruck(BufferedImage b) {
+        int w = b.getWidth(), h = b.getHeight();
+        int[] px = b.getRGB(0, 0, w, h, null, 0, w);
+        long x = 0xcbf29ce484222325L;
+        for (int p : px) {
+            x ^= (p & 0xFFFFFF);
+            x *= 0x100000001b3L;
+        }
+        return x;
+    }
+
+    // Zaehler fuer den Bericht nach jedem Durchlauf (bericht()).
+    private static final java.util.concurrent.atomic.AtomicLong GERECHNET = new java.util.concurrent.atomic.AtomicLong();
+    private static final java.util.concurrent.atomic.AtomicLong GEMERKT = new java.util.concurrent.atomic.AtomicLong();
+    private static final java.util.concurrent.atomic.AtomicLong NANOS = new java.util.concurrent.atomic.AtomicLong();
+    private static final java.util.concurrent.atomic.AtomicLong LADUNGEN = new java.util.concurrent.atomic.AtomicLong();
+
+    /**
+     * "Text recognition: 40 lines computed (812 ms), 12 from memory, models in memory [LATEIN]" -- und zuruecksetzen.
+     * Leer, wenn seit dem letzten Bericht nichts gelesen wurde.
+     */
+    public static String bericht() {
+        long g = GERECHNET.getAndSet(0), m = GEMERKT.getAndSet(0), ms = NANOS.getAndSet(0) / 1_000_000, l = LADUNGEN.getAndSet(0);
+        if (g == 0 && m == 0 && l == 0) return "";
+        return Sprache.t("Text recognition: " + g + " lines computed (" + ms + " ms), " + m + " from memory, " + l
+                        + " model loads, in memory " + geladen(),
+                "Texterkennung: " + g + " Zeilen gerechnet (" + ms + " ms), " + m + " aus dem Gedaechtnis, " + l
+                        + " Modell-Ladungen, im Speicher " + geladen());
     }
 
     private static Modell laden(Schrift s) throws Exception {
@@ -125,6 +251,7 @@ public final class PaddleLeser {
         if (rec == null) return null;
         OrtSession.SessionOptions o = new OrtSession.SessionOptions();
         o.setIntraOpNumThreads(2);
+        // Gemessen 20.11.: ohne den Speicher-Vorrat von ONNX (CPU-Arena) 76 MB weniger, aber Lesen 45 % langsamer -- bleibt an.
         // 28.10.: das Modell laedt ONNX Runtime selbst von der Platte. Vorher kam jedes Modell erst ganz in den
         // Java-Speicher (readAllBytes) -- 135 MB fuer alle sieben, bei -Xmx192m: "OutOfMemoryError: Java heap space"
         // bei JEDEM Start seit dem 26.10., und alle Namen liefen wieder ueber die Windows-Texterkennung.
@@ -188,22 +315,34 @@ public final class PaddleLeser {
     /** Eine Textzeile mit genau diesem Modell lesen (null = Modell fehlt). */
     public static Lesung lesen(BufferedImage zeile, Schrift s) {
         if (zeile == null || !verfuegbar()) return null;
-        Modell m;
-        synchronized (PaddleLeser.class) {
-            m = MODELLE.get(s);
+        zuletztGenutzt = System.currentTimeMillis();
+        Schluessel k = new Schluessel(s, zeile.getWidth(), zeile.getHeight(), abdruck(zeile));
+        Lesung schonGelesen = GEDAECHTNIS.get(k);
+        if (schonGelesen != null) {
+            GEMERKT.incrementAndGet();
+            return schonGelesen;
         }
-        if (m == null) return null;
+        NUTZUNG.readLock().lock();
         try {
+            Modell m = modell(s);
+            if (m == null) return null;
+            long t0 = System.nanoTime();
             Lesung l = dekodieren(m, rechnen(m, zeile), s);
+            NANOS.addAndGet(System.nanoTime() - t0);
+            GERECHNET.incrementAndGet();
             // Messung 29.10. (Trainings-Helfer): arabische Namen kamen VERKEHRT HERUM heraus -- PaddleOCR dreht die Lesung
             // des arabischen Modells selbst um (CTCLabelDecode.pred_reverse), wir taten es nicht: 0 % richtig, mit Umkehr 52 %.
             if (l != null && (s == Schrift.ARABISCH || (s == Schrift.ARABISCH_NAMEN && ARABISCH_NAMEN_UMDREHEN)) && !l.leer()) {
                 l = new Lesung(arabischUmdrehen(l.text()), l.sicher(), l.schrift());
             }
+            if (l != null) GEDAECHTNIS.put(k, l);
             return l;
         } catch (Exception e) {
             Log.debug("Text", "PaddleOCR (" + s + "): " + e.getMessage());
             return null;
+        } finally {
+            zuletztGenutzt = System.currentTimeMillis();
+            NUTZUNG.readLock().unlock();
         }
     }
 
@@ -232,7 +371,7 @@ public final class PaddleLeser {
         boolean sicherLatein = erk != null && erk.wahrscheinlich() >= 0.9
                 && java.util.Set.of("latein", "latein_akzent", "schmuck", "ziffern_symbole").contains(erk.klasse());
         boolean sicherKyrillisch = erk != null && erk.wahrscheinlich() >= 0.9 && "kyrillisch".equals(erk.klasse());
-        Schrift latein = namen && MODELLE.containsKey(Schrift.LATEIN_NAMEN) ? Schrift.LATEIN_NAMEN : Schrift.LATEIN;
+        Schrift latein = namen && hat(Schrift.LATEIN_NAMEN) ? Schrift.LATEIN_NAMEN : Schrift.LATEIN;
         Lesung lat = lesen(zeile, latein);
         if (lat == null) return null;
         // Autor 25.10.: "Dobry1810" las das lateinische Modell "Dobry41810" (0,90), das englische richtig (1,00) --
@@ -249,7 +388,7 @@ public final class PaddleLeser {
         // Namen (Бармалей, Дракон, Сержик, Игорь ...); "kyrillisch nur wenn sicherer" (statt -0,05) machte 10 richtige
         // wieder lateinisch. Kosten: ~6 ms je Name.
         Lesung beste = lat;
-        Lesung kyr = lesen(zeile, namen && MODELLE.containsKey(Schrift.KYRILLISCH_NAMEN) ? Schrift.KYRILLISCH_NAMEN : Schrift.KYRILLISCH);
+        Lesung kyr = lesen(zeile, namen && hat(Schrift.KYRILLISCH_NAMEN) ? Schrift.KYRILLISCH_NAMEN : Schrift.KYRILLISCH);
         // Messung 29.10.: das Namen-Modell kennt Latein UND Kyrillisch und mischt gleich aussehende Buchstaben in einem
         // Wort ("Poмаpio" statt "Ромаріо", "Остаn", "Маx007") -- je Wort auf eine Schrift bringen.
         if (kyr != null && namen) kyr = new Lesung(wortweiseEinheitlich(kyr.text()), kyr.sicher(), kyr.schrift());
@@ -322,7 +461,7 @@ public final class PaddleLeser {
 
     /** Arabisch fuer Spielernamen: das nachtrainierte Modell, wenn es da ist, sonst das Original. */
     private static Schrift arabisch(boolean namen) {
-        return namen && MODELLE.containsKey(Schrift.ARABISCH_NAMEN) ? Schrift.ARABISCH_NAMEN : Schrift.ARABISCH;
+        return namen && hat(Schrift.ARABISCH_NAMEN) ? Schrift.ARABISCH_NAMEN : Schrift.ARABISCH;
     }
 
     /**
@@ -366,7 +505,7 @@ public final class PaddleLeser {
             Lesung l = switch (k.getKey()) {
                 case "gemischt" -> gemischt(zeile);
                 case "chinesisch", "japanisch" -> eigeneSchrift(lesen(zeile,
-                        MODELLE.containsKey(Schrift.CHINESISCH_GROSS) ? Schrift.CHINESISCH_GROSS : Schrift.CHINESISCH),
+                        hat(Schrift.CHINESISCH_GROSS) ? Schrift.CHINESISCH_GROSS : Schrift.CHINESISCH),
                         Character.UnicodeScript.HAN, true);
                 case "koreanisch" -> eigeneSchrift(lesen(zeile, Schrift.KOREANISCH), Character.UnicodeScript.HANGUL, false);
                 case "arabisch" -> eigeneSchrift(lesen(zeile, arabisch(true)), Character.UnicodeScript.ARABIC, false);
@@ -391,7 +530,7 @@ public final class PaddleLeser {
     private static Lesung gemischt(BufferedImage zeile) {
         Lesung beste = null;
         for (Lesung l : new Lesung[]{
-                eigeneSchrift(lesen(zeile, MODELLE.containsKey(Schrift.CHINESISCH_GROSS) ? Schrift.CHINESISCH_GROSS : Schrift.CHINESISCH),
+                eigeneSchrift(lesen(zeile, hat(Schrift.CHINESISCH_GROSS) ? Schrift.CHINESISCH_GROSS : Schrift.CHINESISCH),
                         Character.UnicodeScript.HAN, true),
                 eigeneSchrift(lesen(zeile, Schrift.KOREANISCH), Character.UnicodeScript.HANGUL, false),
                 eigeneSchrift(lesen(zeile, arabisch(true)), Character.UnicodeScript.ARABIC, false)}) {
@@ -652,9 +791,7 @@ public final class PaddleLeser {
         String s = sprache == null ? "" : sprache.toLowerCase(java.util.Locale.ROOT);
         if (s.startsWith("ru") || s.startsWith("uk") || s.startsWith("bg") || s.startsWith("sr-cyrl") || s.equals("be")) return Schrift.KYRILLISCH;
         if (s.startsWith("zh") || s.startsWith("ja")) {
-            synchronized (PaddleLeser.class) {
-                return MODELLE.containsKey(Schrift.CHINESISCH_GROSS) ? Schrift.CHINESISCH_GROSS : Schrift.CHINESISCH;
-            }
+            return hat(Schrift.CHINESISCH_GROSS) ? Schrift.CHINESISCH_GROSS : Schrift.CHINESISCH;
         }
         if (s.startsWith("ko")) return Schrift.KOREANISCH;
         if (s.startsWith("ar")) return Schrift.ARABISCH;

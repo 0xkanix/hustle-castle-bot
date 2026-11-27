@@ -24,6 +24,11 @@ public final class ArenaBeobachter {
     static final long TAKT_SCHICHT_MS = 50;
     private static long blicke, blickeMs, blickZeileUm;
 
+    /** Soll die Arena-Schicht zu? Ja, wenn der Bot gerade selbst einen anderen Modus als Arena spielt (und die Schicht an ist). */
+    static boolean schichtBeenden(BotEngine.State zustand, GameMode modus, boolean schichtAn) {
+        return schichtAn && zustand == BotEngine.State.LAEUFT && modus != null && !(modus instanceof ArenaMode);
+    }
+
     public static synchronized void starten(BotEngine motor) {
         if (faden != null || motor == null) return;
         if (!(motor.modus("arena") instanceof ArenaMode arena)) return;
@@ -42,7 +47,11 @@ public final class ArenaBeobachter {
                         Thread.sleep(4_000);
                         continue;
                     }
-                    if (motor.state() == BotEngine.State.LAEUFT) continue;   // der Bot spielt selbst
+                    if (motor.state() == BotEngine.State.LAEUFT) {   // der Bot spielt selbst
+                        // Spielt er etwas anderes als Arena, ist die Schicht (Seitenfenster, Rahmen) vorbei -- nicht zehn Minuten stehen lassen.
+                        if (schichtBeenden(motor.state(), motor.activeMode(), schicht)) de.hustlebot.schicht.ArenaStand.beenden();
+                        continue;
+                    }
                     Mat bild = blick.beobachten();
                     if (bild == null) {                                      // Spiel nicht vorn: nicht hinsehen
                         Thread.sleep(schicht ? 200 : 2_000);

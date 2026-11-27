@@ -174,6 +174,20 @@ public final class PortalMode implements GameMode {
      */
     private static volatile long planGesetztUm;
 
+    /**
+     * Nahrungs-Reserve (Autor 21.11.): so viel Nahrung bleibt mindestens in der Burg. Vor jedem
+     * Start einer Runde wird die Nahrung gelesen -- bliebe weniger uebrig, endet der Plan (ohne Pause). 0 = keine Reserve.
+     * Gilt wie der Plan nur fuer den Start gleich danach.
+     */
+    private static volatile long reserveNaechstes;
+    private int reserveVersuche;
+    private long reserve;
+
+    /** Bliebe nach einer Runde mit "bedarf" Nahrung weniger als die Reserve uebrig? (reserve <= 0: nie) */
+    static boolean reserveUnterschritten(long da, long bedarf, long reserve) {
+        return reserve > 0 && da - bedarf < reserve;
+    }
+
     // Autor 24.10.: "Clan-Krieg immer setzen, egal welcher Modus -- danach zurueck zur eigentlichen Taetigkeit."
     // Portal wechselt nur zwischen zwei Kaempfen (nach Victory/Home); der Rest des Plans wartet hier auf die Fortsetzung.
     private static volatile int fortsetzungZiel;
@@ -194,6 +208,7 @@ public final class PortalMode implements GameMode {
      */
     public static String planAusText(String text) {
         int ziel = 0;
+        long reserve = 0;
         List<long[]> farm = new java.util.ArrayList<>();
         StringBuilder rest = new StringBuilder();
         String[] w = (text == null ? "" : text.trim()).split("\\s+");
@@ -201,6 +216,11 @@ public final class PortalMode implements GameMode {
             String k = w[i].toLowerCase(java.util.Locale.ROOT);
             if (k.matches("bis|ziel|to|until|bislevel") && i + 1 < w.length && w[i + 1].matches("\\d{1,3}")) {
                 ziel = Integer.parseInt(w[++i]);
+                continue;
+            }
+            if (k.equals("reserve") && i + 1 < w.length) {
+                long r = mengeAus(w[++i]);
+                if (r > 0) reserve = r;
                 continue;
             }
             if (k.matches("farm|farmen|danach") && i + 1 < w.length) {
@@ -215,6 +235,7 @@ public final class PortalMode implements GameMode {
             rest.append(rest.length() == 0 ? "" : " ").append(w[i]);
         }
         planSetzen(ziel, farm);
+        reserveNaechstes = reserve;
         return rest.toString();
     }
 
@@ -239,6 +260,7 @@ public final class PortalMode implements GameMode {
 
     /** Fuer den Test: der zuletzt gesetzte Plan (Ziel, Farm-Liste). */
     static int zielGesetzt() { return zielNaechstes; }
+    static long reserveGesetzt() { return reserveNaechstes; }
     static List<long[]> farmGesetzt() { return farmNaechste; }
 
     private boolean mitPlan, aufstieg;
@@ -337,6 +359,9 @@ public final class PortalMode implements GameMode {
         boolean frisch = System.currentTimeMillis() - planGesetztUm < PLAN_GILT_MS;
         ziel = frisch ? zielNaechstes : 0;
         farm = frisch ? farmNaechste : List.of();
+        reserve = frisch ? reserveNaechstes : 0;
+        reserveVersuche = 0;
+        reserveNaechstes = 0;
         zielNaechstes = 0;
         farmNaechste = List.of();
         planGesetztUm = 0;   // Code-Review 24.10.: verbraucht -- ein zweiter Start in den 2 Minuten bekommt ihn nicht noch einmal
@@ -705,6 +730,27 @@ public final class PortalMode implements GameMode {
                 tippe(ctx, X_EINSTELLUNGEN, "Einstellungen zu (fertig)");
                 ctx.sleepUntilChanged(1000);
                 return Outcome.ACTED;
+            }
+            // Nahrungs-Reserve (Autor 21.11.): bliebe nach dieser Runde weniger als die
+            // Reserve in der Burg, wird sie nicht gespielt -- der Plan endet (keine Pause).
+            // Nicht lesbar: nach zwei Versuchen weiter wie bisher.
+            if (mitPlan && reserve > 0 && reserveVersuche < 2) {
+                long da = Nahrungskisten.nahrungLesen(ctx).orElse(-1);
+                if (da < 0) {
+                    reserveVersuche++;
+                    ctx.sleep(tempo.ms(300));
+                    return Outcome.WAITING;
+                }
+                if (reserveUnterschritten(da, bedarf, reserve)) {
+                    Log.info(WO, "Nahrungs-Reserve: " + zahl(da) + " da, die Runde braucht " + zahl(bedarf) + ", Reserve "
+                            + zahl(reserve) + " -- Schluss mit dem Portal (keine Aepfel mehr ausgeben).");
+                    Log.hinweis("Portal", "Nahrungs-Reserve " + zahl(reserve) + " erreicht -- keine weiteren Portal-Runden fuer das Objective.");
+                    ende = true;
+                    tippe(ctx, X_EINSTELLUNGEN, "Einstellungen zu (Nahrungs-Reserve)");
+                    ctx.sleepUntilChanged(1000);
+                    return Outcome.ACTED;
+                }
+                reserveVersuche = 0;
             }
             // Unmittelbar vor dem Start noch einmal frisch nachsehen: der Diamanten-Haken MUSS aus sein.
             Mat frischStart = ctx.refresh();
@@ -1464,11 +1510,12 @@ public final class PortalMode implements GameMode {
             String[] t = de.hustlebot.core.Dateien.text(STAND_DATEI).strip().split("\\s+");
             int level = Integer.parseInt(t[0]);
             long um = Long.parseLong(t[1]);
-            java.time.ZonedDateTime jetzt = java.time.ZonedDateTime.now(java.time.ZoneId.of("Europe/Berlin"));
+            // Konrad 19.11.: Weltzeit statt Windows-Uhr; 'um' ist Rechneruhr-Zeit
+            java.time.ZonedDateTime jetzt = java.time.ZonedDateTime.ofInstant(de.hustlebot.core.Weltuhr.jetzt(), java.time.ZoneId.of("Europe/Berlin"));
             java.time.ZonedDateTime freitag = jetzt.toLocalDate()
                     .with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.FRIDAY))
                     .atStartOfDay(jetzt.getZone());
-            if (um < freitag.toInstant().toEpochMilli()) return -1;
+            if (um < de.hustlebot.core.Weltuhr.rechnerMs(freitag.toInstant())) return -1;
             Log.info(WO, "Letzter Sieg diese Woche: Level " + level + " (portal-stand.txt) -- weiter mit Level " + (level + 1) + ".");
             return level;
         } catch (Exception e) {

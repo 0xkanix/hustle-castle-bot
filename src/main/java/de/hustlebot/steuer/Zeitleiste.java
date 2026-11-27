@@ -9,7 +9,6 @@ import de.hustlebot.core.Turmplan;
 import de.hustlebot.core.Zeitzone;
 
 import java.time.Duration;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
@@ -91,9 +90,12 @@ final class Zeitleiste {
         }
         LocalTime zeit = LocalTime.parse(wann, UHR);
         // Der Plan rechnet nach der Uhr des PCs, die Leiste nach der Zeitzone des Bots.
-        LocalDateTime lokal = LocalDate.now().atTime(zeit);
-        if (lokal.isBefore(LocalDateTime.now().minusMinutes(1))) lokal = lokal.plusDays(1);
-        LocalDateTime inZone = lokal.atZone(java.time.ZoneId.systemDefault()).withZoneSameInstant(Zeitzone.zone()).toLocalDateTime();
+        LocalDateTime pcJetzt = LocalDateTime.now();
+        LocalDateTime lokal = pcJetzt.toLocalDate().atTime(zeit);
+        if (lokal.isBefore(pcJetzt.minusMinutes(1))) lokal = lokal.plusDays(1);
+        // Konrad 19.11.: nicht ueber den inneren Augenblick von Windows umrechnen (der lag bei ihm 9 h daneben),
+        // sondern den Abstand auf der PC-Uhr auf die Bot-Uhr legen.
+        LocalDateTime inZone = Zeitzone.jetzt().plus(Duration.between(pcJetzt, lokal));
         l.add(new Termin(inZone, name, false));
     }
 

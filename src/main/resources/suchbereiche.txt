@@ -1,0 +1,82 @@
+# Feste Suchbereiche (Sparsam 20.11.): wo eine Vorlage im Spielfenster 1159x770 je gefunden wurde.
+# Belegt an den gemerkten Knopfstellen (vorlagen-stellen.txt) aus 1544 Freunde-Berichten und Autors Bot.
+# name=minX,minY,maxX,maxY = Spanne der linken oberen Ecke; * = diese Achse frei (Streifen ueber das ganze Bild).
+# Aufgenommen: in mindestens 10 Berichten gemerkt, hoechstens 5 % davon "wandert", eine Achse fest. Nie: Weltkarten-Orte
+# (_node), Clan-Krieg, Arena, Burg/Kaserne, Ziffern. Gesucht wird im Bereich plus 60 Bildpunkte Rand.
+# Von Hand dazu (wenige Berichte, alle an derselben Stelle): chat_schreiben (9 Berichte, y 701), chat_senden (8 Berichte).
+# Von Hand dazu (oft "wandert", weil je Truppenplatz eine andere x-Lage -- die Zeile y ist in allen ~750 Berichten gleich):
+# ready, deploy_best_2, deploy_best_alt.
+# Pruefung an echten Spielbildern (SuchbereicheMessungTest, 20.11.): wer dort ab 0,70 ausserhalb seines Bereichs
+# auftauchte, ist hier NICHT drin (24 Vorlagen, u. a. ad_close, dc_close_x, ev_angebot_x, dc_done_empty, dc_quick_attack).
+# Zweite Pruefung (193 weitere Spielbilder, Graustufen): wieder 18 Vorlagen ausserhalb gefunden (u. a. tt_home, du_fackel_icon,
+# ether_icon, progress_100, ts_held_battle). Darum NUR noch Vorlagen, die (1) in beiden Pruefungen nie ausserhalb lagen und
+# (2) in Autors Protokollen seit Oktober unter den teuersten Ganzbild-Suchen standen (dort liegt die Ersparnis).
+# Nie: Orte auf der Weltkarte (ko_tower, *_node) -- die wandern mit der Karte.
+ad_running_out=577,258,577,258
+bag_close=20,680,20,680
+cancel_search=*,620,*,620
+chat_close=*,323,*,323
+chat_offen=12,*,12,*
+chat_schreiben=*,701,*,701
+chat_senden=1000,694,1000,694
+close_reward=487,590,487,677
+daily_reward=449,97,449,99
+dc_ally_screen=459,77,459,77
+dc_end_journey=941,682,945,683
+dc_guardian_lair=*,285,*,351
+dc_join_squad=857,582,872,593
+dc_journey_done=72,32,73,32
+dc_key_icon=588,126,628,132
+dc_multiplier=538,618,539,624
+dc_previous_squad=591,346,592,352
+dc_reward_text=363,*,364,*
+dc_waypoint_done=369,60,370,140
+dc_yes=403,447,405,454
+deploy_best_2=*,359,*,359
+deploy_best_alt=*,357,*,357
+dialog_weiter=*,732,*,734
+end_journey=947,668,957,679
+end_journey_green=948,671,958,679
+ev_belohnung_erhalten=484,*,484,*
+ev_claim=465,625,465,625
+ev_open=491,*,491,*
+ev_refresh_yes=380,504,382,507
+ev_superhammer_text=186,119,186,119
+ev_view=485,544,485,547
+event_reward=361,*,361,*
+fr_claim_all=745,600,745,600
+fr_get_resources=745,160,745,160
+fr_heute_text=760,149,760,149
+fr_kiste_balken=667,136,667,136
+fr_limit_text=748,162,748,162
+fr_no_space=508,255,508,255
+fr_reiter_friends_aktiv=740,80,740,80
+fr_sent=847,285,847,285
+gb_to_battle=484,451,484,451
+ko_auswahl=687,524,688,530
+ko_quick_attack=659,594,661,602
+ko_titel=469,4,470,4
+lh_claim_reward=594,173,594,173
+lh_quick_attack=575,561,578,571
+lh_titel=463,3,464,3
+lh_titel_abend=468,5,468,5
+map_button_alt=37,640,37,652
+multiplier=*,518,*,518
+other_device=347,321,347,321
+participate=*,628,*,628
+pt_auto_battle=599,573,599,573
+pt_fertig=413,264,413,264
+pt_kampf_laeuft=35,68,35,68
+pt_kampf_pause=505,685,505,685
+ready=*,357,*,357
+switch_dwellers=329,658,329,658
+ts_info_knopf=*,603,*,615
+ts_switch_dwellers=351,664,351,664
+tt_auto=702,684,703,696
+tt_auto_titel=437,210,437,210
+tt_fertig=513,144,514,150
+tt_laeuft=450,524,451,533
+tt_start=856,596,862,606
+tt_zur_truppe=492,463,493,469
+update_button=507,452,507,479
+worldmap_home=40,629,41,641

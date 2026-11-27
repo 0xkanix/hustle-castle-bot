@@ -79,7 +79,29 @@ public final class Log {
 
     public static void info(String source, String message)   { write(Level.INFO, source, message); }
     public static void action(String source, String message) { write(Level.ACTION, source, message); }
-    public static void warn(String source, String message)   { write(Level.WARN, source, message); }
+    public static void warn(String source, String message)   {
+        letzteWarnung = message;
+        letzteWarnungVon = source;
+        letzteWarnungUm = System.currentTimeMillis();
+        write(Level.WARN, source, message);
+    }
+
+    /** Die letzte Warnung, wer sie schrieb und wann (18.11.: Grund, wenn ein Modus vorzeitig "fertig" meldet). */
+    private static volatile String letzteWarnung, letzteWarnungVon;
+    private static volatile long letzteWarnungUm;
+
+    /** Der letzte Warntext, wenn er hoechstens so alt ist und von keiner der Quellen {@code ausser} kommt; sonst null. */
+    public static String letzteWarnung(long hoechstensMs, String... ausser) {
+        String w = letzteWarnung;
+        if (w == null || System.currentTimeMillis() - letzteWarnungUm > hoechstensMs) return null;
+        String von = letzteWarnungVon;
+        if (ausser != null) {
+            for (String a : ausser) {
+                if (a != null && a.equals(von)) return null;
+            }
+        }
+        return w;
+    }
     public static void error(String source, String message)  {
         letzterFehler = message;
         letzterFehlerUm = System.currentTimeMillis();

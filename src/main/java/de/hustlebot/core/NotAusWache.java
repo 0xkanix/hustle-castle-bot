@@ -40,6 +40,8 @@ public final class NotAusWache implements Runnable {
         this.zweck = zweck;
         this.beschreibung = beschreibung;
         this.beiNotAus = beiNotAus;
+        // 18.11.: Der Bot tippt jetzt auch Text (Clan-Chat) -- diese Taste dabei nie druecken, sonst haelt er sich selbst an.
+        Tastatur.nichtDruecken(vk);
     }
 
     /**

@@ -70,6 +70,7 @@ public final class SchriftErkenner {
             da = !klassen.isEmpty();
         } catch (Throwable t) {
             Log.info("Text", "Schrift-Erkenner nicht nutzbar: " + t);
+            Onnxnativ.laufzeitMelden(t);
             da = false;
         }
         return da;

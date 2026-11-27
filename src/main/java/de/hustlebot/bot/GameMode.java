@@ -132,8 +132,29 @@ public interface GameMode {
         return java.util.Map.of();
     }
 
-    /** Ein Auftrag, der nach diesem Modus angehaengt werden soll. */
-    record Folge(String modus, int runs) {}
+    /**
+     * Ein Auftrag, der nach diesem Modus angehaengt werden soll. weg wie beim !start-Befehl (Kathedrale: "c" = Turbo);
+     * ohne Angabe "c" wie bisher.
+     */
+    record Folge(String modus, int runs, String weg, String plan) {
+        public Folge(String modus, int runs) {
+            this(modus, runs, "c", "");
+        }
+
+        public Folge(String modus, int runs, String weg) {
+            this(modus, runs, weg, "");
+        }
+
+        /** plan: Portal-Plan-Text ("farm 80:550000 reserve 1000000"); leer = keiner. */
+        public Folge {
+            plan = plan == null ? "" : plan.strip();
+        }
+
+        /** Der Weg fuer die Warteschlange; leer -> "c" (so war es immer). */
+        public String wegOderC() {
+            return weg == null || weg.isBlank() ? "c" : weg;
+        }
+    }
 
     /**
      * Soll nach dem Ende (FINISHED) noch ein Auftrag folgen? Die Kathedrale im
@@ -143,6 +164,15 @@ public interface GameMode {
      */
     default Folge folgeAuftrag() {
         return null;
+    }
+
+    /**
+     * Mehrere Folge-Auftraege der Reihe nach, vorn in die Warteschlange (18.11.: z. B. haengen die Tages-Spielquests
+     * Gem Bay, Verlies, Arena ... an). Standard: nur folgeAuftrag() -- fuer alle anderen Modi bleibt alles gleich.
+     */
+    default List<Folge> folgeAuftraege() {
+        Folge f = folgeAuftrag();
+        return f == null ? List.of() : List.of(f);
     }
 
     /** Ergebnis eines Arbeitsschritts. */

@@ -36,6 +36,11 @@ final class Weltkarte {
             T_HOME, "dc_node", "ar_node", "dungeon_node", "lh_node", "ko_tower");
 
     static boolean erkannt(Mat screen, BotContext ctx) {
+        // Autor 21.11. (Kathedrale schneller, Vorlagen pruefen): auf der Weltkarte ist "Home" unten links immer da (gemessen
+        // 0,68-1,00, alles andere in der Ecke hoechstens 0,33, siehe HOME_ECKE_AB). Fehlt er, ist es nie die Weltkarte -- dann
+        // nicht alle Orte im ganzen Bild suchen. Das kostete je unerkanntem Bild ~85 ms (ar_node 26, dc_node 24, lh_node 13,
+        // dungeon_node 11 ...), in der Kathedrale ~20x je Run = ~1,7 s (Nachtprotokolle 21.11., 224 Runs).
+        if (!vielleichtKarte(screen, ctx)) return false;
         for (String n : ORTE) {
             if (ctx.visibleIfKnown(screen, n)) return true;
         }
@@ -83,6 +88,14 @@ final class Weltkarte {
         if (screen == null || screen.empty() || m == null || !m.has(T_HOME)) return java.util.Optional.empty();
         int y = screen.rows() * 3 / 5;
         return m.findImBereich(screen, T_HOME, new org.opencv.core.Rect(0, y, screen.cols() / 3, screen.rows() - y), HOME_ECKE_AB);
+    }
+
+    /**
+     * Kann das die Weltkarte sein? Nur, wenn "Home" unten links zu sehen ist (billig: nur die Ecke). Fehlt die Vorlage,
+     * gilt wie bisher "vielleicht" -- dann entscheiden die Orte im ganzen Bild.
+     */
+    static boolean vielleichtKarte(Mat screen, BotContext ctx) {
+        return !ctx.matcher().has(T_HOME) || homeUntenLinks(screen, ctx.matcher()).isPresent();
     }
 
     /** Home unten links druecken, wenn er zu sehen ist (siehe {@link #homeUntenLinks}). */

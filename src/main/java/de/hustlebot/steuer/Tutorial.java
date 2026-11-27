@@ -68,11 +68,11 @@ final class Tutorial {
             new Schritt(S, "start", PipBild.Pose.ERKLAERT, "Start", "Start",
                     "One button for everything: starts what is chosen above. From then on the mouse belongs to the bot.",
                     "Ein Knopf für alles: startet, was oben gewählt ist. Ab dann gehört die Maus dem Bot."),
-            new Schritt(S, "danach", PipBild.Pose.ERKLAERT, "Add afterwards", "Danach anhängen",
-                    "Plans a second mode that starts by itself when the first one is done. First Start, then choose the "
-                    + "next mode and press this button. As many as you like.",
-                    "Plant einen zweiten Modus, der von selbst startet, wenn der erste fertig ist. Erst Start, dann den "
-                    + "nächsten Modus wählen und diesen Knopf drücken. Beliebig viele hintereinander."),
+            new Schritt(S, "danach", PipBild.Pose.ERKLAERT, "Queue", "Warteschlange",
+                    "Opens a window for up to 5 modes one after another, each with all its settings. Press Start there: "
+                    + "number 1 begins, the others follow by themselves. Saveable as a profile.",
+                    "Öffnet ein Fenster für bis zu 5 Modi nacheinander, jeder mit allen Einstellungen. Dort Start drücken: "
+                    + "Nummer 1 beginnt, die anderen folgen von selbst. Als Profil speicherbar."),
             new Schritt(S, "kreislauf", PipBild.Pose.ERKLAERT, "Loop (event routine)", "Kreislauf (Event-Ablauf)",
                     "The routine without an end: Cathedral, and every N cathedrals the event (hammer or titan, see Settings), "
                     + "uses all hammers, then carries on. On the side Lighthouse, Colosseum, Titan tower -- and the Clan War "
