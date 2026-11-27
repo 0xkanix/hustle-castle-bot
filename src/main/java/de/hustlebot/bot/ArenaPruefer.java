@@ -849,7 +849,11 @@ final class ArenaPruefer {
                 }
                 gesehen.add(mitte(screen));
                 gesehenFelder.add(kaserne ? List.of() : ArenaAussehen.ausschneiden(screen));
-                gesehenMerkmale.add(kaserne ? List.of() : ArenaAussehen.merkmale(screen));
+                // Konrad 19.11.: Merkmale (Kraft, Leben, Talent, Guardian) auch in der Kaserne merken. Ohne sie galt dort
+                // nur die Figur: seine "Mage 1"/"Mage 2" und "Archer 1"/"Archer 2" sehen gleich aus -- der Team-Scan hielt
+                // die zweite fuer "Klick kam nicht an" bzw. "einmal herum" und sah 2-3 statt 5 Einheiten (Messlatte 43 statt
+                // ~0). Die Ausruestung bleibt in der Kaserne aussen vor (dort laden die Gegenstaende noch, 16.10.).
+                gesehenMerkmale.add(ArenaAussehen.merkmale(screen));
                 einheiten++;
                 if (nurAussehen) return aussehenVergleichen(screen, ctx, schwerter);
                 // Autor 22.10.: das Aussehen jeder Einheit merken (Schnell-Blick in der naechsten Runde). Vor
@@ -2810,7 +2814,7 @@ final class ArenaPruefer {
     }
 
     /** Ein Ausschnitt aus der Bildmitte -- dort steht die Einheit selbst. */
-    private static Mat mitte(Mat screen) {
+    static Mat mitte(Mat screen) {
         int w = screen.cols() / 6, h = screen.rows() / 5;
         Rect r = new Rect(screen.cols() / 2 - w / 2, screen.rows() / 2 - h / 2, w, h);
         Mat ausschnitt = new Mat(screen, r);   // Review 15.10.: den Ausschnitt-Kopf freigeben, sonst haelt er das ganze Bild
@@ -2832,7 +2836,20 @@ final class ArenaPruefer {
 
     /** An welcher Stelle der schon gesehenen Einheiten steht diese, oder -1. */
     private int gesehenAn(Mat screen) {
-        zwillingJetzt = false;
+        Treffer t = gesehenUnter(screen, gesehen, gesehenFelder, gesehenMerkmale);
+        zwillingJetzt = t.zwilling();
+        return t.stelle();
+    }
+
+    /** Ergebnis von {@link #gesehenUnter}: Stelle der schon gesehenen Einheit (-1 = neu), und ob ein Zwilling dabei war. */
+    record Treffer(int stelle, boolean zwilling) {}
+
+    /**
+     * Die reine Regel hinter {@link #gesehenAn} (testbar): gleiche Figur und -- soweit gemerkt -- gleiche Ausruestung und
+     * gleiche Merkmale = dieselbe Einheit. Gleiche Figur, aber andere Ausruestung oder Merkmale = Zwilling (eine andere).
+     */
+    static Treffer gesehenUnter(Mat screen, List<Mat> gesehen, List<List<Mat>> gesehenFelder, List<List<Mat>> gesehenMerkmale) {
+        boolean zwilling = false;
         Mat jetzt = mitte(screen);
         List<Mat> felder = null, merkmale = null;
         try {
@@ -2849,7 +2866,7 @@ final class ArenaPruefer {
                 if (!alt.isEmpty()) {
                     if (felder == null) felder = ArenaAussehen.ausschneiden(screen);
                     if (!felder.isEmpty() && ArenaAussehen.aehnlichkeit(alt, felder) < DIESELBE_AUSRUESTUNG) {
-                        zwillingJetzt = true;
+                        zwilling = true;
                         continue;
                     }
                 }
@@ -2859,15 +2876,15 @@ final class ArenaPruefer {
                 if (!mAlt.isEmpty()) {
                     if (merkmale == null) merkmale = ArenaAussehen.merkmale(screen);
                     if (!ArenaAussehen.gleicheMerkmale(mAlt, merkmale)) {
-                        zwillingJetzt = true;
+                        zwilling = true;
                         continue;
                     }
                 }
-                return i;
+                return new Treffer(i, zwilling);
             }
-            return -1;
+            return new Treffer(-1, zwilling);
         } catch (Exception e) {
-            return -1;
+            return new Treffer(-1, zwilling);
         } finally {
             jetzt.release();
             if (felder != null) ArenaAussehen.freigeben(felder);

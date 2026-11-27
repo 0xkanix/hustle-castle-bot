@@ -145,6 +145,7 @@ public final class DiscordClient {
         try {
             HttpResponse<String> antwort = http.send(json(payload), HttpResponse.BodyHandlers.ofString());
             int status = antwort.statusCode();
+            if (status >= 200 && status < 300) de.hustlebot.core.Weltuhr.datumKopf(antwort.headers());   // Konrad 19.11.
             if (status < 200 || status >= 300) {
                 failure(Sprache.t("Discord answered with ", "Discord antwortete mit ") + status + ": " + cut(antwort.body(), 200));
                 return false;
@@ -808,6 +809,7 @@ public final class DiscordClient {
             HttpResponse<String> response =
                     http.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() < 200 || response.statusCode() >= 300) return null;
+            de.hustlebot.core.Weltuhr.datumKopf(response.headers());   // Konrad 19.11.: Discord sagt die Uhrzeit
 
             return mapper.readTree(response.body());
         } catch (Exception e) {

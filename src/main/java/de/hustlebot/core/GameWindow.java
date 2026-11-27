@@ -1,6 +1,7 @@
 package de.hustlebot.core;
 
 import com.sun.jna.Native;
+import com.sun.jna.Pointer;
 import com.sun.jna.platform.win32.User32;
 import com.sun.jna.platform.win32.WinDef;
 import com.sun.jna.platform.win32.WinUser;
@@ -37,11 +38,18 @@ public final class GameWindow {
 
         /** Eine Taste druecken/loslassen (hier nur Alt, fuer die Vordergrund-Sperre). */
         void keybd_event(byte bVk, byte bScan, int dwFlags, int dwExtraInfo);
+
+        /** Antwortet das Fenster nicht mehr ("Keine Rueckmeldung")? Bericht UK3S. */
+        boolean IsHungAppWindow(WinDef.HWND hWnd);
     }
 
     private static final int SWP_NOZORDER = 0x0004;
     private static final int SWP_NOACTIVATE = 0x0010;
+    private static final int SWP_NOSIZE = 0x0001;
+    private static final int SWP_NOMOVE = 0x0002;
+    private static final int SWP_ASYNCWINDOWPOS = 0x4000;
     private static final int SW_RESTORE = 9;
+    private static final int SW_SHOWNOACTIVATE = 4;
     private static final int SM_CXSCREEN = 0;
 
     /**
@@ -78,6 +86,17 @@ public final class GameWindow {
 
     private WinDef.HWND handle;
 
+    /**
+     * NUR FUER TESTS (Ablauf-Probe 19.11.): ist das gesetzt, gilt dieser Bildschirmbereich als Spielfenster -- ohne
+     * Windows. Die Probe zeigt Autors Spielbilder unter einer virtuellen Anzeige an und laesst den echten Modus darauf
+     * los. Im Bot wird es nie gesetzt (Standard null = alles wie immer).
+     */
+    private static volatile Rectangle probeFenster = null;
+
+    public static void probeFensterSetzen(Rectangle r) {
+        probeFenster = r == null ? null : new Rectangle(r);
+    }
+
     public GameWindow(String windowTitle, int targetWidth, int targetHeight) {
         this.windowTitle = windowTitle;
         this.targetWidth = targetWidth;
@@ -98,12 +117,28 @@ public final class GameWindow {
      * dreimal kam er wieder.
      */
     public boolean locateVisible() {
+        if (probeFenster != null) return true;
         handle = findByPartialTitle(windowTitle);
+        spielMelden();
         return handle != null;
+    }
+
+    /**
+     * Hintergrund-Modus (EXPERIMENTELL, Autor 20.11.): gilt nur fuer das Spielfenster (feste Groesse), nie fuer den
+     * Launcher -- und nur mit hintergrund.txt "an".
+     */
+    private boolean hintergrund() {
+        return targetWidth > 0 && targetHeight > 0 && Hintergrund.an();
+    }
+
+    /** Das gefundene Spielfenster der Hintergrund-Wache melden (Tastatur, !stop, Bot-Ende). */
+    private void spielMelden() {
+        if (handle != null && targetWidth > 0 && targetHeight > 0) Hintergrund.spielFensterMerken(handle);
     }
 
     /** Sucht das Fenster. Gibt false zurueck, wenn es nicht offen ist. */
     public boolean locate() {
+        if (probeFenster != null) return true;
         handle = Ext.INSTANCE.FindWindow(null, windowTitle);
         if (handle == null) {
             // Zweiter Versuch: Fenstertitel enthaelt den Suchbegriff nur teilweise.
@@ -114,6 +149,7 @@ public final class GameWindow {
                     "Kein Fenster mit dem Titel '" + windowTitle + "' gefunden."));
             return false;
         }
+        spielMelden();
         return true;
     }
 
@@ -129,6 +165,7 @@ public final class GameWindow {
      * sichtbar), siehe findByPartialTitle().
      */
     public boolean istDa() {
+        if (probeFenster != null) return true;
         return findByPartialTitle(windowTitle) != null;
     }
 
@@ -205,7 +242,16 @@ public final class GameWindow {
 
     /** Holt das Fenster nach vorne, stellt es wieder her und setzt die Zielgroesse. */
     public void prepare() {
+        if (probeFenster != null) return;
         if (handle == null) return;
+        if (hintergrund()) {
+            hintergrundVorbereiten();
+            return;
+        }
+        // Hintergrund-Modus aus, das Spiel aber noch unsichtbar (umgeschaltet, Absturz): erst wieder normal machen.
+        if (targetWidth > 0 && targetHeight > 0 && Geist.istGeist(handle)) {
+            Geist.aus(handle, "background mode is off", "Hintergrund-Modus ist aus");
+        }
 
         if (Ext.INSTANCE.IsIconic(handle)) {
             Log.info("Fenster", Sprache.t("Window was minimized, restoring it.",
@@ -275,6 +321,29 @@ public final class GameWindow {
 
     private long vordergrundGewarntUm = 0;
 
+    /**
+     * prepare() im Hintergrund-Modus: nie nach vorne holen, nie aktivieren. Nur: nicht minimiert (SW_SHOWNOACTIVATE),
+     * richtige Groesse (ohne zu verschieben) und der Ruhezustand des Geists (unsichtbar, ausserhalb des Bildschirms).
+     * Hat Autor das Spiel geoeffnet, bleibt es, wie es ist.
+     */
+    private void hintergrundVorbereiten() {
+        if (Hintergrund.nutzerHatSpiel()) return;
+        if (Ext.INSTANCE.IsIconic(handle)) {
+            Ext.INSTANCE.ShowWindow(handle, SW_SHOWNOACTIVATE);
+            sleep(400);
+        }
+        WinDef.RECT outer = new WinDef.RECT();
+        Ext.INSTANCE.GetWindowRect(handle, outer);
+        int sollBreite = targetWidth + korrekturBreite;
+        int sollHoehe = targetHeight + korrekturHoehe;
+        if (outer.right - outer.left != sollBreite || outer.bottom - outer.top != sollHoehe) {
+            Ext.INSTANCE.SetWindowPos(handle, null, 0, 0, sollBreite, sollHoehe, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE);
+            sleep(500);
+        }
+        if (!innenGeprueft && targetWidth == 1175 && targetHeight == 809) innenPruefen(outer.left, outer.top);
+        Geist.ruheSicherstellen(handle);
+    }
+
     /** Einmal je Start: Innenmass messen, ins Protokoll schreiben und bei Abweichung das Aussenmass nachstellen. */
     private void innenPruefen(int links, int oben) {
         Rectangle innen = clientArea();
@@ -293,8 +362,10 @@ public final class GameWindow {
                         + INNEN_HOEHE + " (Windows scaling or design?) -- the window is adjusted by " + dB + "/" + dH + " pixels.",
                 "Spielfenster innen " + innen.width + "x" + innen.height + " statt " + INNEN_BREITE + "x" + INNEN_HOEHE
                         + " (Windows-Skalierung oder Design?) -- das Fenster wird um " + dB + "/" + dH + " Pixel nachgestellt."));
+        // Hintergrund-Modus: nur die Groesse, die Lage gehoert dem Geist.
         Ext.INSTANCE.SetWindowPos(handle, null, links - dB, oben,
-                targetWidth + korrekturBreite, targetHeight + korrekturHoehe, SWP_NOZORDER | SWP_NOACTIVATE);
+                targetWidth + korrekturBreite, targetHeight + korrekturHoehe,
+                SWP_NOZORDER | SWP_NOACTIVATE | (hintergrund() ? SWP_NOMOVE : 0));
         sleep(500);
         Rectangle neu = clientArea();
         if (neu != null) {
@@ -313,6 +384,7 @@ public final class GameWindow {
      * @return true, wenn das Innenmass danach passt
      */
     public boolean innenmassRichten() {
+        if (probeFenster != null) return true;
         if (handle == null || Ext.INSTANCE.IsIconic(handle)) return false;
         Rectangle innen = clientArea();
         if (innen == null) return false;
@@ -326,7 +398,9 @@ public final class GameWindow {
         int screenW = Ext.INSTANCE.GetSystemMetrics(SM_CXSCREEN);
         int links = screenW > breite ? screenW - breite + RAND_KOMPENSATION : outer.left;
         int oben = screenW > breite ? 0 : outer.top;
-        Ext.INSTANCE.SetWindowPos(handle, null, links, oben, breite, hoehe, SWP_NOZORDER | SWP_NOACTIVATE);
+        // Hintergrund-Modus: nicht auf den Bildschirm holen, nur die Groesse richten.
+        Ext.INSTANCE.SetWindowPos(handle, null, links, oben, breite, hoehe,
+                SWP_NOZORDER | SWP_NOACTIVATE | (hintergrund() ? SWP_NOMOVE : 0));
         sleep(500);
         Rectangle neu = clientArea();
         boolean passt = neu != null && Math.abs(INNEN_BREITE - neu.width) <= 2 && Math.abs(INNEN_HOEHE - neu.height) <= 2;
@@ -347,6 +421,7 @@ public final class GameWindow {
      * also ohne Titelleiste und Rahmen.
      */
     public Rectangle clientArea() {
+        if (probeFenster != null) return new Rectangle(probeFenster);
         if (handle == null) return null;
 
         WinDef.RECT client = new WinDef.RECT();
@@ -359,6 +434,14 @@ public final class GameWindow {
         int height = client.bottom - client.top;
         if (width <= 0 || height <= 0) return null;
 
+        if (hintergrund()) {
+            // Hintergrund-Modus: das Fenster wandert fuer jeden Tipp unter den Mauszeiger und liegt sonst ausserhalb des
+            // Bildschirms. Der Bot rechnet deshalb so, als laege die Fensterecke bei 0,0 -- dann ist jeder Punkt des Bots
+            // genau der Punkt im PrintWindow-Bild (HintergrundSteuerung).
+            WinDef.RECT w = new WinDef.RECT();
+            if (!Ext.INSTANCE.GetWindowRect(handle, w)) return null;
+            return new Rectangle(origin.x - w.left, origin.y - w.top, width, height);
+        }
         return new Rectangle(origin.x, origin.y, width, height);
     }
 
@@ -370,6 +453,7 @@ public final class GameWindow {
      * das, was man auf einem Bildschirmfoto sieht.
      */
     public Rectangle windowRect() {
+        if (probeFenster != null) return new Rectangle(probeFenster);
         if (handle == null) return null;
 
         WinDef.RECT r = new WinDef.RECT();
@@ -394,6 +478,7 @@ public final class GameWindow {
      * minimiertes Fenster gilt fuer Windows trotzdem als "sichtbar".
      */
     public void bringToFront() {
+        if (probeFenster != null) return;
         if (handle == null) return;
 
         // ACHTUNG: IsIconic() allein reicht nicht.
@@ -418,13 +503,78 @@ public final class GameWindow {
         sleep(400);
     }
 
+    /**
+     * Bericht UK3S (Ben 19.11.): derselbe Klick wirkte immer wieder nicht, das Fenster liess sich nicht nach vorne
+     * holen. Staerker als prepare(): das Fenster einmal ganz oben in die Fensterreihe heben (kurz "immer oben", dann
+     * wieder normal -- dafuer braucht es keine Vordergrund-Erlaubnis von Windows), dann wie gewohnt mit dem Alt-Kniff
+     * aktivieren. Asynchron, damit ein haengendes Spiel den Bot nicht mit festhaelt.
+     *
+     * @return true = das Spiel ist jetzt das aktive Fenster
+     */
+    public boolean nachVorneZwingen() {
+        if (probeFenster != null) return true;
+        if (handle == null || !isAlive()) return false;
+        if (hintergrund()) {   // Hintergrund-Modus: nie nach vorne -- nur den Geist-Zustand richten
+            Geist.ruheSicherstellen(handle);
+            return !Ext.INSTANCE.IsIconic(handle);
+        }
+        if (Ext.INSTANCE.IsIconic(handle)) {
+            Ext.INSTANCE.ShowWindow(handle, SW_RESTORE);
+            sleep(400);
+        }
+        int flags = SWP_NOSIZE | SWP_NOMOVE | SWP_ASYNCWINDOWPOS;
+        Ext.INSTANCE.SetWindowPos(handle, new WinDef.HWND(Pointer.createConstant(-1)), 0, 0, 0, 0, flags);   // HWND_TOPMOST
+        sleep(150);
+        Ext.INSTANCE.SetWindowPos(handle, new WinDef.HWND(Pointer.createConstant(-2)), 0, 0, 0, 0, flags);   // HWND_NOTOPMOST
+        sleep(150);
+        Ext.INSTANCE.keybd_event((byte) 0x12, (byte) 0, 0, 0);            // Alt runter (Vordergrund-Sperre, s. prepare)
+        Ext.INSTANCE.SetForegroundWindow(handle);
+        Ext.INSTANCE.keybd_event((byte) 0x12, (byte) 0, 0x0002, 0);       // Alt hoch
+        sleep(300);
+        return isForeground();
+    }
+
+    /** Meldet Windows das Spiel als "Keine Rueckmeldung" (antwortet seit etwa 5 s nicht)? Bericht UK3S. */
+    public boolean reagiertNicht() {
+        if (probeFenster != null || handle == null) return false;
+        try {
+            return isAlive() && Ext.INSTANCE.IsHungAppWindow(handle);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /**
+     * Was liegt gerade vorne? Fensterklasse und Programmname, fuers Protokoll -- KEIN Fenstertitel (der koennte
+     * Privates zeigen). Klasse "Ghost" heisst: Windows zeigt fuer ein haengendes Fenster nur noch dessen Standbild.
+     */
+    public static String vordergrund() {
+        try {
+            WinDef.HWND fg = Ext.INSTANCE.GetForegroundWindow();
+            if (fg == null) return "-";
+            char[] b = new char[128];
+            int n = Ext.INSTANCE.GetClassName(fg, b, b.length);
+            String klasse = n > 0 ? new String(b, 0, n) : "?";
+            com.sun.jna.ptr.IntByReference pid = new com.sun.jna.ptr.IntByReference();
+            Ext.INSTANCE.GetWindowThreadProcessId(fg, pid);
+            String prog = ProcessHandle.of(pid.getValue()).flatMap(p -> p.info().command())
+                    .map(c -> c.substring(Math.max(c.lastIndexOf('\\'), c.lastIndexOf('/')) + 1)).orElse("?");
+            return klasse + " / " + prog;
+        } catch (Throwable t) {
+            return "?";
+        }
+    }
+
     /** Ist dieses Fenster gerade das aktive? */
     public boolean isForeground() {
+        if (probeFenster != null) return true;
+        if (hintergrund()) return isAlive() && !Ext.INSTANCE.IsIconic(handle);   // das Spiel ist nie vorne -- und muss es nicht
         return handle != null && handle.equals(Ext.INSTANCE.GetForegroundWindow());
     }
 
     /** Ist das Fenster gerade in die Leiste gelegt? */
     public boolean isMinimized() {
+        if (probeFenster != null) return false;
         return handle != null && Ext.INSTANCE.IsIconic(handle);
     }
 
@@ -436,10 +586,12 @@ public final class GameWindow {
      * klickt auf den Schreibtisch.
      */
     public boolean isVisible() {
+        if (probeFenster != null) return true;
         return handle != null && Ext.INSTANCE.IsWindowVisible(handle);
     }
 
     public boolean isAlive() {
+        if (probeFenster != null) return true;
         return handle != null && Ext.INSTANCE.IsWindow(handle);
     }
 
@@ -456,8 +608,10 @@ public final class GameWindow {
      * Spiel ueberhaupt zu sehen ist.
      */
     public boolean istImVordergrund() {
+        if (probeFenster != null) return true;
         if (!isAlive()) return false;
         if (Ext.INSTANCE.IsIconic(handle)) return false;
+        if (hintergrund()) return true;   // Hintergrund-Modus: PrintWindow sieht das Spiel auch verdeckt
         return handle.equals(Ext.INSTANCE.GetForegroundWindow());
     }
 

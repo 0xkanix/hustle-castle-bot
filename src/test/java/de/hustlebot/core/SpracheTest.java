@@ -57,6 +57,8 @@ class SpracheTest {
         assertEquals("Dungeon", Sprache.quelle("Verlies"));
         assertEquals("Arena", Sprache.quelle("Arena"));   // unbekannt oder gleich: bleibt
         assertEquals("Cathedral (Hammer-Event)", Sprache.quelle("Kathedrale (Hammer-Event)"));
+        assertEquals("Accounts", Sprache.quelle("Konten"));   // 22.11.: Quellen der Modi, die Autor nutzt
+        assertEquals("Daily quests", Sprache.quelle("Spiel-Quests"));
         assertEquals("Fremd (x)", Sprache.quelle("Fremd (x)"));
 
         Sprache.set(Sprache.Lang.DE);

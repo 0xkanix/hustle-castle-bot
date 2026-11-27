@@ -278,6 +278,15 @@ final class Etagennetz {
         long ohneKlickSeit;
         /** So oft wurde dieser Stuetzpunkt auf seine bekannte Stelle hin angeklickt, ohne dass ein Motiv erkannt war. */
         int blindKlicks;
+        /**
+         * GEDAECHTNIS (Bauplan L1, 09.10.): das zuletzt gesehene Motiv dieses
+         * Stuetzpunkts -- offen ODER mit Schloss. Bleibt stehen, wenn er auf
+         * einem Bild verdeckt ist (Schriftzug "You have got a blessing").
+         * Neu nur mit der Etage; nach einem Klick auf ihn verbraucht.
+         */
+        Matcher.Hit motiv;
+        /** Grundname des Motivs (dc_skirmish, dc_cube ...), sonst null. */
+        String art;
 
         Knoten(int x, int y, boolean sockel) {
             this.x = x;
@@ -285,9 +294,48 @@ final class Etagennetz {
             this.sockel = sockel;
         }
 
+        /** Eine Kopie mit allen Feldern -- fuer die Vorausplanung (Bauplan L2). */
+        Knoten kopie() {
+            Knoten c = new Knoten(x, y, sockel);
+            c.fertig = fertig;
+            c.frage = frage;
+            c.boss = boss;
+            c.waechter = waechter;
+            c.klick = klick;
+            c.gesperrt = gesperrt;
+            c.frageJetzt = frageJetzt;
+            c.aufJetzt = aufJetzt;
+            c.frageGesehenUm = frageGesehenUm;
+            c.zuletztZu = zuletztZu;
+            c.frageBlicke = frageBlicke;
+            c.warFrage = warFrage;
+            c.aufgedecktUm = aufgedecktUm;
+            c.warBoss = warBoss;
+            c.ohneKlickSeit = ohneKlickSeit;
+            c.blindKlicks = blindKlicks;
+            c.motiv = motiv;
+            c.art = art;
+            return c;
+        }
+
+        /** Motiv merken (Gedaechtnis). */
+        void motivMerken(Matcher.Hit m) {
+            motiv = m;
+            art = grundname(m.name());
+        }
+
         boolean zuJetzt() {
             return gesperrt || frageJetzt;
         }
+    }
+
+    /** Grundname einer Vorlage: dc_skirmish_alt -> dc_skirmish (die ersten zwei Teile). */
+    static String grundname(String name) {
+        if (name == null) return null;
+        int a = name.indexOf('_');
+        if (a < 0) return name;
+        int b = name.indexOf('_', a + 1);
+        return b < 0 ? name : name.substring(0, b);
     }
 
     /** Zwei Sockel naeher als das sind derselbe. */
@@ -482,12 +530,36 @@ final class Etagennetz {
         return aus;
     }
 
+    /**
+     * Gedaechtnis-Klick erlaubt (Bauplan L1, Schalter gedaechtnisklick)? Setzt
+     * die Kathedrale vor jedem planen(). Aus = das alte Verhalten (warten).
+     */
+    private boolean gedaechtnisKlick = false;
+
+    void gedaechtnisKlickErlauben(boolean an) {
+        gedaechtnisKlick = an;
+    }
+
+    /** Probelauf der Vorausplanung: planenFest ohne Protokoll und ohne planAmAnfang (Bauplan L2). */
+    private boolean probelauf = false;
+
+    /** Ob der zuletzt berechnete Schritt aus dem Gedaechtnis stammt (gemerkte Stelle statt sichtbares Motiv). */
+    private boolean planAusGedaechtnis = false;
+
+    /** Liefert und loescht den Merker (gilt nur fuer den Klick, der gleich auf den Plan folgt). */
+    boolean planAusGedaechtnisVerbrauchen() {
+        boolean b = planAusGedaechtnis;
+        planAusGedaechtnis = false;
+        return b;
+    }
+
     /** Traegt gezielt gefundene Motive nach (siehe offenOhneMotiv). */
     void nachtragen(List<Matcher.Hit> motive, List<String> bossNamen) {
         if (fest < 0) return;
         for (Matcher.Hit m : motive) {
             Knoten k = zuSymbol(m);
             if (k == null || k.fertig || k.gesperrt || k.klick != null) continue;
+            k.motivMerken(m);
             k.klick = m;
             k.aufJetzt = true;
             k.frage = false;
@@ -655,8 +727,11 @@ final class Etagennetz {
                 if (festNachbar[i][j]) gelernt.add(schluessel(i, j));
             }
         }
+        String welche = FESTE_NAMEN[fest];
         fest = -1;
         gelerntesGesucht = true;
+        unbekanntMerken(Sprache.t("the game contradicts the fixed map \"" + welche + "\" (" + wo + ")",
+                "das Spiel widerspricht der festen Karte \"" + welche + "\" (" + wo + ")"), massstabZuletzt);
     }
 
     /** Neue Etage: alles vergessen. Vorher wird gelernt, was die alte gezeigt hat. */
@@ -679,6 +754,146 @@ final class Etagennetz {
         erster = -1;
         unklarSeit = 0;
         zuVorher = new boolean[0];
+        unbekannt = null;
+    }
+
+    // ------------------------------------------------------------------
+    //  Suchkaesten an den Stuetzpunkten der festen Karte (21.11.)
+    // ------------------------------------------------------------------
+    //
+    // Autor 21.11.: "Der Bot erkennt am Anfang, welches Muster die Etage hat, und sucht dann nur noch an den Positionen
+    // der Wegpunkte, die sind je Muster immer gleich."
+    //
+    // GEMESSEN an 232 Etagenbildern (logs\etagen beider Bots, 08.10.-21.11.): Jedes war eine der fuenf festen Karten
+    // (Ring 122, Stern 85, Schnecke 16, Gitter 8, Raute 1), ihre Sockel lagen im Mittel je Bild hoechstens 4 Punkte neben
+    // den eingetragenen Stellen. Die MITTE jedes Treffers ab 0,84 (Motive, Schloesser, Fragezeichen, Bosse, Waechter,
+    // Waechter-Schrift, besuchte) lag 6 links bis 9 rechts und 60 ueber bis 17 unter ihrem Stuetzpunkt. Der Kasten unten
+    // laesst rundum gut 20 Punkte Luft. Von den 14 Stuetzpunkten der Karte waren auf jedem Bild 11 bis 14 an ihrer
+    // Stelle zu sehen, von jeder anderen Karte hoechstens 7.
+
+    /** So weit links/rechts von seinem Stuetzpunkt darf die Mitte eines Symbols liegen (gemessen hoechstens 9). */
+    static final int KASTEN_SEITLICH_PX = 30;
+    /** So weit darueber (gemessen hoechstens 60) ... */
+    static final int KASTEN_DARUEBER_PX = 90;
+    /** ... und so weit darunter (gemessen hoechstens 17, die Waechter-Schrift). */
+    static final int KASTEN_DARUNTER_PX = 40;
+    /** So viele Stuetzpunkte der festen Karte muessen im jetzigen Bild an ihrer Stelle zu sehen sein. */
+    static final int KASTEN_AB_TREFFER = 8;
+
+    /** Je feste Karte: wie viele ihrer Stuetzpunkte haben in diesem Bild einen Sockel an ihrer Stelle? */
+    static int[] kartenTreffer(List<Matcher.Hit> sockel, double massstab) {
+        List<Matcher.Hit> echte = ohneSymbole(sockel);
+        int[] t = new int[FEST_ORTE.size()];
+        for (int f = 0; f < FEST_ORTE.size(); f++) {
+            for (int[] o : FEST_ORTE.get(f)) {
+                for (Matcher.Hit s : echte) {
+                    if (Math.hypot(o[0] * massstab - s.centerX(), o[1] * massstab - s.centerY()) <= GLEICH_PX) {
+                        t[f]++;
+                        break;
+                    }
+                }
+            }
+        }
+        return t;
+    }
+
+    /** Zeigt dieses Bild sicher die feste Karte f (genug Stuetzpunkte an ihrer Stelle, klar vor jeder anderen)? */
+    static boolean bildZeigt(int f, List<Matcher.Hit> sockel, double massstab) {
+        if (f < 0 || f >= FEST_ORTE.size() || sockel == null) return false;
+        int[] t = kartenTreffer(sockel, massstab);
+        int andere = 0;
+        for (int g = 0; g < t.length; g++) if (g != f) andere = Math.max(andere, t[g]);
+        return t[f] >= KASTEN_AB_TREFFER && t[f] - andere >= 3;
+    }
+
+    /** Die feste Karte, die dieses eine Bild sicher zeigt, sonst -1 (fuer Pruefungen an Fotos). */
+    static int festeKarteIm(List<Matcher.Hit> sockel, int breite) {
+        double massstab = breite / BREITE_GEMESSEN;
+        for (int f = 0; f < FEST_ORTE.size(); f++) if (bildZeigt(f, sockel, massstab)) return f;
+        return -1;
+    }
+
+    static String festerName(int f) {
+        return f >= 0 && f < FESTE_NAMEN.length ? FESTE_NAMEN[f] : "?";
+    }
+
+    /** Je Stuetzpunkt der festen Karte f der Kasten, in dem die MITTE eines Symbols liegen darf. */
+    static List<org.opencv.core.Rect> symbolKaesten(int f, int breite, int hoehe) {
+        double massstab = breite / BREITE_GEMESSEN;
+        int sx = (int) Math.ceil(KASTEN_SEITLICH_PX * massstab);
+        int oben = (int) Math.ceil(KASTEN_DARUEBER_PX * massstab);
+        int unten = (int) Math.ceil(KASTEN_DARUNTER_PX * massstab);
+        List<org.opencv.core.Rect> aus = new ArrayList<>();
+        for (int[] o : FEST_ORTE.get(f)) {
+            int x = (int) Math.round(o[0] * massstab), y = (int) Math.round(o[1] * massstab);
+            int x0 = Math.max(0, x - sx), y0 = Math.max(0, y - oben);
+            int x1 = Math.min(breite, x + sx + 1), y1 = Math.min(hoehe, y + unten + 1);
+            if (x1 > x0 && y1 > y0) aus.add(new org.opencv.core.Rect(x0, y0, x1 - x0, y1 - y0));
+        }
+        return aus;
+    }
+
+    /**
+     * Wo auf diesem Bild die Mitte eines Symbols liegen kann: je Stuetzpunkt der festen Karte ein Kasten. Null (= wie
+     * bisher im ganzen Bild suchen), wenn die Etage nicht auf einer festen Karte laeuft oder das Bild sie nicht sicher
+     * zeigt (Schriftzug davor, schon die naechste Etage, anderer Ausschnitt).
+     */
+    List<org.opencv.core.Rect> symbolKaesten(List<Matcher.Hit> sockel, int breite, int hoehe) {
+        if (fest < 0 || !bildZeigt(fest, sockel, breite / BREITE_GEMESSEN)) return null;
+        return symbolKaesten(fest, breite, hoehe);
+    }
+
+    // ------------------------------------------------------------------
+    //  Unbekanntes Etagenmuster (21.11.)
+    // ------------------------------------------------------------------
+
+    private double massstabZuletzt = 1;
+    /** {Fingerabdruck, Beschreibung} eines unbekannten Musters dieser Etage, bis die Kathedrale es abholt. */
+    private String[] unbekannt = null;
+
+    private void unbekanntMerken(String warum, double massstab) {
+        List<int[]> orte = new ArrayList<>();
+        for (Knoten k : knoten) {
+            if (k.sockel) orte.add(new int[]{(int) Math.round(k.x / massstab), (int) Math.round(k.y / massstab)});
+        }
+        orte.sort((a, b) -> a[1] != b[1] ? Integer.compare(a[1], b[1]) : Integer.compare(a[0], b[0]));
+        int beste = -1, besteTreffer = -1;
+        for (int f = 0; f < FEST_ORTE.size(); f++) {
+            int t = 0;
+            for (int[] o : FEST_ORTE.get(f)) {
+                for (int[] k : orte) {
+                    if (Math.hypot(o[0] - k[0], o[1] - k[1]) <= GLEICH_PX) {
+                        t++;
+                        break;
+                    }
+                }
+            }
+            if (t > besteTreffer) {
+                besteTreffer = t;
+                beste = f;
+            }
+        }
+        StringBuilder stellen = new StringBuilder();
+        for (int[] o : orte) stellen.append(o[0]).append(',').append(o[1]).append(' ');
+        unbekannt = new String[]{fingerabdruck(orte), warum + "; " + orte.size()
+                + Sprache.t(" waypoints at ", " Stuetzpunkte bei ") + stellen.toString().trim()
+                + Sprache.t(" (1159x770); closest fixed map \"", " (1159x770); naechste feste Karte \"") + FESTE_NAMEN[beste]
+                + "\" " + besteTreffer + "/" + FEST_ORTE.get(beste).size()};
+    }
+
+    /** Fingerabdruck einer Karte: ihre Sockel auf ein 80-Punkte-Raster gerundet, sortiert, als kurze Zahl. */
+    static String fingerabdruck(List<int[]> orte) {
+        List<String> zellen = new ArrayList<>();
+        for (int[] o : orte) zellen.add(Math.round(o[0] / 80.0) + "/" + Math.round(o[1] / 80.0));
+        java.util.Collections.sort(zellen);
+        return Integer.toHexString(String.join(" ", zellen).hashCode());
+    }
+
+    /** Das unbekannte Muster dieser Etage {Fingerabdruck, Beschreibung} -- einmal, danach null. */
+    String[] unbekanntesMusterAbholen() {
+        String[] u = unbekannt;
+        unbekannt = null;
+        return u;
     }
 
     /** War diese Karte beim ersten Blick noch unbekannt? Dann lohnt ein Foto zum Nachmessen. */
@@ -698,6 +913,14 @@ final class Etagennetz {
         // sofort angeklickt statt erst nach anderthalb Sekunden Hinsehen.
         for (Knoten k : knoten) k.ohneKlickSeit = 0;
         unklarSeit = 0;
+        // Das gemerkte Motiv ist mit dem Klick verbraucht (Bauplan L1): Wird
+        // der Klick nicht angenommen, kommt es erst mit einem neuen Bild
+        // wieder -- so wird kein Stuetzpunkt zweimal blind aus dem Gedaechtnis
+        // angeklickt.
+        if (letzter >= 0 && letzter < knoten.size()) {
+            knoten.get(letzter).motiv = null;
+            knoten.get(letzter).art = null;
+        }
         // Nur was das Bild DIESER Entscheidung als zu zeigt, zaehlt. Der
         // letzte bekannte Stand reicht nicht (Test 27.09., 03:12: 23
         // "bewiesene" Linien auf einer Karte mit rund 16): Ein Stuetzpunkt,
@@ -732,6 +955,11 @@ final class Etagennetz {
         k.klick = null;
         k.aufJetzt = false;
         k.ohneKlickSeit = 0;
+    }
+
+    /** Ist der zuletzt angeklickte Stuetzpunkt abgeschlossen (Segen oder "Waypoint completed")? */
+    boolean letzterFertig() {
+        return letzter >= 0 && letzter < knoten.size() && knoten.get(letzter).fertig;
     }
 
     int planAmAnfang() {
@@ -830,11 +1058,13 @@ final class Etagennetz {
      * @param sockel        alle Sockel (ohne den Bildrand)
      * @param fertigeSockel die tuerkisen -- abgeschlossene Stuetzpunkte (mit Bildrand)
      * @param offene        anklickbare Stuetzpunkte (erkanntes Motiv, kein Schloss)
+     * @param gesperrteMotive erkannte Motive MIT Schloss -- nur fuers Gedaechtnis (Bauplan L1)
      * @param reif          die Karte steht lange genug (zweiter Blick)
      */
     void beobachten(Mat screen, List<Matcher.Hit> sockel, List<Matcher.Hit> fertigeSockel,
                     List<Matcher.Hit> fragen, List<Matcher.Hit> bosse, Optional<Matcher.Hit> waechter,
-                    List<Matcher.Hit> offene, List<Matcher.Hit> schloesser, boolean reif) {
+                    List<Matcher.Hit> offene, List<Matcher.Hit> gesperrteMotive,
+                    List<Matcher.Hit> schloesser, boolean reif) {
         bilder++;
 
         for (Matcher.Hit s : ohneSymbole(sockel)) {
@@ -867,12 +1097,17 @@ final class Etagennetz {
 
         // Zuerst die festen Karten: Passt eine, gelten genau ihre Stuetzpunkte
         // und Linien. Sonst das Gelernte.
+        massstabZuletzt = screen.cols() / BREITE_GEMESSEN;
         if (fest < 0 && !gelerntesGesucht && zahlSockel() >= KARTE_AB_KNOTEN) {
             double massstab = screen.cols() / BREITE_GEMESSEN;
             int f = festeKarteSuchen(massstab);
             if (f >= 0) {
                 festUebernehmen(f, massstab);
                 gelerntesGesucht = true;
+            } else {
+                // Autor 21.11.: "Ist ein Muster unbekannt: Fehlerbericht an Claude." Die Etage laeuft weiter wie
+                // bisher (gelerntes Netz, Suche im ganzen Bild); die Kathedrale holt das hier ab und meldet es.
+                unbekanntMerken(Sprache.t("no fixed map fits", "keine feste Karte passt"), massstab);
             }
         }
         gelerntesUebernehmen();
@@ -909,9 +1144,21 @@ final class Etagennetz {
             Knoten k = zuSymbol(o);
             if (k == null) continue;
             k.frage = false;          // ein erkanntes Motiv: aufgedeckt
+            k.motivMerken(o);         // Gedaechtnis (Bauplan L1)
             if (!k.fertig && !k.gesperrt) {
                 k.klick = o;
                 k.aufJetzt = true;
+            }
+        }
+        // Gedaechtnis auch fuer Motive mit Schloss (Bauplan L1): Geht der
+        // Stuetzpunkt spaeter auf, waehrend der Schriftzug davor liegt, ist
+        // seine Stelle schon bekannt. Nur auf einer festen Karte -- sonst
+        // wuerde zuSymbol neue Stuetzpunkte anlegen. Am Zustand aendert das
+        // nichts (gesperrt kommt aus den Schloessern oben).
+        if (fest >= 0) {
+            for (Matcher.Hit g : gesperrteMotive) {
+                Knoten k = zuSymbol(g);
+                if (k != null && !k.fertig) k.motivMerken(g);
             }
         }
         for (Matcher.Hit b : bosse) {
@@ -1214,6 +1461,7 @@ final class Etagennetz {
      * @param reif der zweite Blick ist erfolgt (die Karte steht lange genug)
      */
     Plan planen(boolean reif) {
+        planAusGedaechtnis = false;
         if (fest >= 0) return planenFest();
         Plan sicher = planen(reif, false);
         if (sicher != null) return sicher;
@@ -1255,6 +1503,96 @@ final class Etagennetz {
     private boolean aufUnklaresWarten(long jetzt) {
         if (unklarSeit == 0) unklarSeit = jetzt;
         return jetzt - unklarSeit < AUFGEDECKT_WARTEN_MS;
+    }
+
+    /**
+     * GEDAECHTNIS-KLICK (Bauplan L1, 09.10.): Darf ein gerade verdeckter
+     * Stuetzpunkt an der Stelle seines gemerkten Motivs angeklickt werden?
+     *
+     * Gemessen 08.10. (64 Runs): 144-mal "der naechste Schritt ist gerade
+     * verdeckt", jedes Mal rund 450 ms mehr als ein normaler Schritt. Auf
+     * einer festen Karte ist bekannt, dass er offen ist (ein Nachbar ist
+     * fertig), und wo sein Motiv sitzt (frueheres Bild, auch mit Schloss).
+     *
+     * Nur, wenn nichts dagegen spricht: Schalter an, ein Nachbar fertig, im
+     * jetzigen Bild weder Schloss noch Fragezeichen, und auf der Etage gibt es
+     * gerade kein aufgedecktes, noch unerkanntes Fragezeichen (das koennte ein
+     * Boss sein -- Regel "a/c: Bosse zuerst"). Der Waechter nie.
+     */
+    private boolean ausGedaechtnisErlaubt(Knoten k, boolean etwasFertig, boolean unklar) {
+        return gedaechtnisKlick && !probelauf && fest >= 0 && etwasFertig && !unklar
+                && k.motiv != null && !k.fertig && !k.waechter
+                && !k.gesperrt && !k.frageJetzt && !k.frage;
+    }
+
+    /**
+     * VORAUSPLANUNG (Bauplan L2, 09.10.): Der naechste Schritt, ausgerechnet
+     * gleich beim Klick auf den Stuetzpunkt -- so, als waere er schon fertig.
+     * Nach Kampf oder Fenster muss die Kathedrale dann nur noch an DIESER
+     * Stelle nachsehen statt die ganze Karte auszuwerten (gemessen 08.10.:
+     * ~93 ms je voller Auswertung).
+     *
+     * Gerechnet wird auf einer KOPIE der Stuetzpunkte: Der gespielte gilt als
+     * fertig, jeder Stuetzpunkt mit gemerktem Motiv und fertigem Nachbarn als
+     * offen. Was hinter einem Fragezeichen steckt, zeigt erst das Spiel --
+     * deshalb gibt es nichts, wenn neben dem gespielten Stuetzpunkt ein
+     * Fragezeichen ist oder war oder einer, dessen Motiv nie zu sehen war.
+     * Auch nichts, wenn die Antwort nicht SCHRITT ist (der Waechter wird nie
+     * vorausgeplant).
+     *
+     * @return der Plan, oder null
+     */
+    Plan vorausPlanen() {
+        if (fest < 0 || letzter < 0 || letzter >= knoten.size()) return null;
+        Knoten gespielterKnoten = knoten.get(letzter);
+        if (gespielterKnoten.waechter || gespielterKnoten.fertig) return null;
+        for (int j = 0; j < knoten.size(); j++) {
+            if (j == letzter || !festNachbar[letzter][j]) continue;
+            Knoten nb = knoten.get(j);
+            if (nb.fertig || nb.waechter) continue;                           // der Waechter ist bekannt
+            if (nb.frage || nb.warFrage || nb.frageBlicke > 0) return null;   // dahinter kann ein Boss stecken
+            if (nb.motiv == null) return null;                                // nie erkannt
+        }
+        List<Knoten> echt = new ArrayList<>(knoten);
+        long unklarVorher = unklarSeit;
+        int planVorher = planAmAnfang;
+        long jetzt = System.currentTimeMillis();
+        try {
+            knoten.clear();
+            for (Knoten k : echt) knoten.add(k.kopie());
+            Knoten g = knoten.get(letzter);
+            g.fertig = true;
+            g.frage = false;
+            g.boss = false;
+            g.klick = null;
+            g.aufJetzt = false;
+            g.gesperrt = false;
+            g.frageJetzt = false;
+            for (int i = 0; i < knoten.size(); i++) {
+                Knoten k = knoten.get(i);
+                k.ohneKlickSeit = 0;
+                if (k.fertig || k.waechter) continue;
+                boolean dran = false;
+                for (int j = 0; j < knoten.size() && !dran; j++) dran = festNachbar[i][j] && knoten.get(j).fertig;
+                if (!dran) continue;
+                if (k.aufgedecktUm == 0) k.aufgedecktUm = jetzt;
+                if (k.motiv != null) {
+                    k.klick = k.motiv;
+                    k.gesperrt = false;
+                    k.frageJetzt = false;
+                    k.aufJetzt = true;
+                }
+            }
+            probelauf = true;
+            Plan p = planenFest(false);
+            return p != null && p.art() == Art.SCHRITT && p.klick() != null ? p : null;
+        } finally {
+            probelauf = false;
+            knoten.clear();
+            knoten.addAll(echt);
+            unklarSeit = unklarVorher;
+            planAmAnfang = planVorher;
+        }
     }
 
     /**
@@ -1347,6 +1685,8 @@ final class Etagennetz {
         int besteGroesse = -1;
         int besterSchritt = -1;
         int besterRang = Integer.MAX_VALUE;
+        // Der beste Schritt ist nur aus dem Gedaechtnis bekannt (Bauplan L1).
+        boolean besterAusGedaechtnis = false;
         boolean schrittVerdeckt = false;
         int ohneMotiv = -1;
         for (int groesse = 0; groesse <= frei.size() && besteGroesse < 0; groesse++) {
@@ -1395,7 +1735,12 @@ final class Etagennetz {
                     boolean dran = !etwasFertig;
                     for (int j = 0; j < n && !dran; j++) dran = festNachbar[i][j] && knoten.get(j).fertig;
                     if (!dran) continue;
-                    if (knoten.get(i).klick == null) {
+                    // GEDAECHTNIS (Bauplan L1, 09.10.): Ist der Schritt gerade
+                    // verdeckt, aber sein Motiv von einem frueheren Bild
+                    // bekannt, gilt die gemerkte Stelle -- nur mit Schalter.
+                    boolean ausGedaechtnis = knoten.get(i).klick == null
+                            && ausGedaechtnisErlaubt(knoten.get(i), etwasFertig, unklar);
+                    if (knoten.get(i).klick == null && !ausGedaechtnis) {
                         schrittVerdeckt = true;
                         Knoten k = knoten.get(i);
                         if (mitNichtKlickbaren && etwasFertig && !k.gesperrt && !k.frageJetzt
@@ -1407,9 +1752,12 @@ final class Etagennetz {
                     }
                     // Was ohnehin gespielt werden muss, zuerst.
                     int rang = pflicht.contains(i) ? 0 : rang(i, festNachbar);
-                    if (rang < besterRang) {
+                    // Bei gleichem Rang geht ein SICHTBARER Schritt vor einem
+                    // aus dem Gedaechtnis (ohne Gedaechtnis-Schritte wie bisher).
+                    if (rang < besterRang || (rang == besterRang && besterAusGedaechtnis && !ausGedaechtnis)) {
                         besterRang = rang;
                         besterSchritt = i;
+                        besterAusGedaechtnis = ausGedaechtnis;
                     }
                 }
             }
@@ -1423,7 +1771,9 @@ final class Etagennetz {
         }
 
         int noetig = besteGroesse + pflicht.size() + (waechter >= 0 ? 1 : 0);
-        if (planAmAnfang < 0) {
+        if (probelauf) {
+            // Vorausplanung (Bauplan L2): nur rechnen, nichts protokollieren.
+        } else if (planAmAnfang < 0) {
             planAmAnfang = noetig + zahlFertig();
             Log.info("Kathedrale", de.hustlebot.core.Sprache.t("Route planning: fixed map \"", "Wegplanung: feste Karte \"") + FESTE_NAMEN[fest] + de.hustlebot.core.Sprache.t("\". At least ", "\". Noch mindestens ")
                     + noetig + de.hustlebot.core.Sprache.t(" waypoints to the next floor (", " Stuetzpunkte bis zur naechsten Etage (") + besteGroesse + de.hustlebot.core.Sprache.t(" stepping stones, ", " Trittsteine, ")
@@ -1442,6 +1792,12 @@ final class Etagennetz {
                     : k.warFrage ? de.hustlebot.core.Sprache.t("revealed question mark", "aufgedecktes Fragezeichen")
                     : besterRang == 1 ? de.hustlebot.core.Sprache.t("stepping stone, reveals a question mark", "Trittstein, deckt ein Fragezeichen auf")
                     : de.hustlebot.core.Sprache.t("stepping stone", "Trittstein");
+            if (besterAusGedaechtnis) {
+                planAusGedaechtnis = true;
+                return new Plan(Art.SCHRITT, k.motiv, noetig,
+                        was + de.hustlebot.core.Sprache.t(" (fixed map, " + noetig + " to go) (from memory: " + k.art + ")",
+                                " (feste Karte, noch " + noetig + ") (aus dem Gedaechtnis: " + k.art + ")"));
+            }
             return new Plan(Art.SCHRITT, k.klick, noetig,
                     was + de.hustlebot.core.Sprache.t(" (fixed map, " + noetig + " to go)", " (feste Karte, noch " + noetig + ")"));
         }

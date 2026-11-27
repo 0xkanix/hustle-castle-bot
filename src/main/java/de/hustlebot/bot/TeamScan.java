@@ -564,6 +564,20 @@ public final class TeamScan {
                 }
                 Optional<Matcher.Hit> info = ctx.matcher().has(T_INFO) ? ctx.find(screen, T_INFO) : Optional.empty();
                 if (info.isEmpty()) {
+                    // Robin 22.11. (Bericht 7HE3, Zweitkonto, 3.164): das Antippen der Kaserne traf eine herumlaufende Figur --
+                    // statt des Raum-Menues ging deren Einheitenfenster auf (kein Info-Knopf, Info-Teil uebersprungen). Hier tippte
+                    // der Bot dann noch einmal an dieselbe Stelle [613,413], mitten ins offene Fenster auf einen Gegenstand:
+                    // Einheit 1 hiess "Equipped by" (Kopfzeile des Gegenstand-Fensters), "support" zaehlte doppelt und die
+                    // sechste Einheit (Oid, 5,2 Mio.) fehlte. Steht das Einheitenfenster schon offen, gleich darin lesen.
+                    Schritt direkt = ohneMenue(einheitenFensterOffen(screen, ctx));
+                    if (direkt != null) {
+                        Log.info(WER, de.hustlebot.core.Sprache.t(
+                                "The unit window is already open (the tap on the barracks hit a unit) -- reading the units right there.",
+                                "Das Einheitenfenster ist schon offen (der Tipp auf die Kaserne traf eine Einheit) -- die Einheiten werden gleich darin gelesen."));
+                        tipps = 0;
+                        schrittSetzen(direkt);
+                        return true;
+                    }
                     // Ein falsches Fenster offen (Upgrade, Alliances)? Erst zu. Sonst ist das Menue weg: die Kaserne EINMAL
                     // antippen (Autor 11.10.: ein zweites Antippen zoomt an den Globus heran).
                     if (fensterZu(screen, ctx)) return true;
@@ -1354,8 +1368,25 @@ public final class TeamScan {
         return k > 100_000 ? k : -1;
     }
 
+    /**
+     * Robin 22.11. (7HE3): kein Raum-Menue der Kaserne zu sehen, aber ein Einheitenfenster offen -> die Einheiten gleich
+     * darin lesen (FIGUR_TIPPEN liest ein offenes Fenster sofort, ohne zu tippen). null = kein Fenster, wie bisher weiter.
+     */
+    static Schritt ohneMenue(boolean einheitenFensterOffen) {
+        return einheitenFensterOffen ? Schritt.FIGUR_TIPPEN : null;
+    }
+
     private boolean einheitenFensterOffen(Mat screen, BotContext ctx) {
         return ctx.visibleIfKnown(screen, "ar_dwellers") || ctx.visibleIfKnown(screen, ArenaPruefer.T_KASERNE_FENSTER);
+    }
+
+    /**
+     * Konrad 19.11. (Bericht LQAP 29.10.: Squad power 2.426.245, "Archer 1" mit 4.913.354): Eine Einheit kann nicht mehr Kraft
+     * haben als der ganze Trupp -- dann hat die Texterkennung eine Ziffer dazugelesen. -1 = nicht gelesen.
+     */
+    static long kraftGlaubhaft(long kraft, long squadPower) {
+        if (kraft <= 0) return -1;
+        return squadPower > 0 && kraft > squadPower ? -1 : kraft;
     }
 
     /** Je Einheit (aus dem ArenaPruefer): Name oben im Fenster, Kraft aus der Pruefung. */
@@ -1366,7 +1397,12 @@ public final class TeamScan {
         String n = ArenaLeser.liesText(bild, x, y, w, h);
         n = n.replaceAll("[^\\p{L}\\p{N} '._-]", " ").replaceAll("\\s+", " ").strip();
         if (n.isBlank()) n = "Einheit " + (einheiten.size() + 1);
-        long k = kraft == null ? -1 : kraft;
+        long k = kraftGlaubhaft(kraft == null ? -1 : kraft, squadPower);
+        if (kraft != null && kraft > 0 && k < 0) {
+            Log.info(WER, "Einheit " + (einheiten.size() + 1) + ": Kraft " + String.format(Locale.GERMANY, "%,d", kraft)
+                    + " ist groesser als die ganze Squad power " + String.format(Locale.GERMANY, "%,d", squadPower)
+                    + " -- Lesefehler, gilt als nicht gelesen.");
+        }
         einheiten.add(new MeinTeam.Einheit(n, k));
         Log.info(WER, "Einheit " + einheiten.size() + ": \"" + n + "\"" + (k > 0 ? ", Kraft " + String.format(Locale.GERMANY, "%,d", k) : ", Kraft nicht gelesen") + ".");
         if (einheiten.size() <= 2) foto(bild, "einheit-" + einheiten.size());
@@ -1882,7 +1918,9 @@ public final class TeamScan {
         // 29.10. (Arena-Pruefung H1): am 27.10. 16:25 lief der Rundgang im Zweitkonto "Zweitkonto A'" und
         // ueberschrieb arena-ich.txt, einheiten-auto.txt und die Einheiten-Bilder des AKTIVEN Kontos Autor (Messlatte 16
         // statt 86). Passt der gelesene Spielername nicht zum aktiven Konto, wird nichts gespeichert.
-        if (!kontoPasst(de.hustlebot.core.Konten.aktiv(), name)) {
+        // Autor 22.11. (Konto-Erkennung): auch eine bestaetigte Schreibweise des Kontos (konto-namen.txt, umbenannt) und
+        // "Name #ID" zaehlen -- sonst verwarf der Team-Scan direkt nach dem Anlegen eines neuen Kontos sein Ergebnis.
+        if (!kontoPasst(de.hustlebot.core.Konten.aktiv(), name) && !de.hustlebot.core.Konten.passtZumAktiven(name)) {
             Log.warn(WER, de.hustlebot.core.Sprache.t("Team scan in the game account \"" + name + "\", but the bot's active account is \""
                             + de.hustlebot.core.Konten.aktiv() + "\" -- nothing saved (it would overwrite the other account's team).",
                     "Team-Scan im Spielkonto \"" + name + "\", aktiv ist aber das Konto \"" + de.hustlebot.core.Konten.aktiv()

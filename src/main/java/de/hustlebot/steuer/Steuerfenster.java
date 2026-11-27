@@ -364,22 +364,18 @@ final class Steuerfenster extends JFrame implements Steuerprogramm.Abmeldbar {
 
         JButton los = Holzstil.knopf("Start", Sprache.t("Starts what is chosen above.", "Startet, was oben gewaehlt ist."), Holzstil.GUT, Symbol.Art.START);
         los.addActionListener(e -> starten());
-        JButton danach = Holzstil.knopf(Sprache.t("Add after", "Danach anhängen"),
-                Sprache.t("Puts the mode after the running one (like !after).", "Haengt den Modus hinter den laufenden (wie !after)."), Symbol.Art.LISTE);
-        danach.addActionListener(e -> {
-            if (modus.getSelectedItem() instanceof Befehlsbau.Modus) {
-                mitspielerMerken();
-                steuer.senden(startBefehl(true), Sprache.t("After button", "Knopf Danach"));
-                danachGemerkt.add(startBefehl(true));   // F35: fuer "Als Profil speichern"
-            }
-        });
-        // Autor 24.10. (F35): Modus, Anzahl und das, was man mit "Danach anhaengen" geplant hat, als Profil speichern --
-        // ohne eine Befehlszeile zu schreiben.
+        // Autor 15.11.: aus "Danach anhaengen" wird "Warteschlange" -- ein eigenes Fenster mit bis zu 5 Modi nacheinander, jeder
+        // mit allen Einstellungen. Der Ziel-Name "danach" bleibt (Tutorial, Hilfesuche).
+        JButton danach = Holzstil.knopf(Sprache.t("Queue", "Warteschlange"),
+                Sprache.t("Opens the queue: up to 5 modes one after another, each with all its settings.",
+                        "Öffnet die Warteschlange: bis zu 5 Modi nacheinander, jeder mit allen Einstellungen."), Symbol.Art.LISTE);
+        danach.addActionListener(e -> warteschlangeZeigen());
+        // Autor 24.10. (F35): Modus und Anzahl als Profil speichern -- ohne eine Befehlszeile zu schreiben.
         JButton alsProfil = Holzstil.knopf(Sprache.t("Save as profile", "Als Profil speichern"),
-                Sprache.t("Saves what is chosen above (and what you added with \"Add after\") as a profile with a name of your choice. "
-                        + "It then appears in the mode list.",
-                        "Speichert, was oben gewählt ist (und was du mit „Danach anhängen“ geplant hast), als Profil mit einem Namen deiner Wahl. "
-                        + "Es steht danach in der Modus-Liste."), Symbol.Art.HAKEN);
+                Sprache.t("Saves what is chosen above as a profile with a name of your choice. It then appears in the mode list. "
+                        + "Several modes in a row: in the queue.",
+                        "Speichert, was oben gewählt ist, als Profil mit einem Namen deiner Wahl. Es steht danach in der Modus-Liste. "
+                        + "Mehrere Modi nacheinander: in der Warteschlange."), Symbol.Art.HAKEN);
         alsProfil.addActionListener(e -> alsProfilSpeichern());
         JButton ablauf = Holzstil.knopf(Sprache.t("Loop", "Kreislauf"),
                 Sprache.t("Event loop: cathedral and event, lighthouse, colosseum and clan war on the side.",
@@ -406,15 +402,14 @@ final class Steuerfenster extends JFrame implements Steuerprogramm.Abmeldbar {
         startReihe2.add(ablaufOhne);
         // Autor 14.10.: "Danach anhaengen" und "PC danach aus" verstaendlicher -- mit Anleitung.
         JButton hilfe = Holzstil.kleinerKnopf(Sprache.t("Guide", "Anleitung"),
-                Sprache.t("How Start, Add after and Loop work.", "So funktionieren Start, Danach anhängen und Kreislauf."), Symbol.Art.LUPE);
+                Sprache.t("How Start, Queue and Loop work.", "So funktionieren Start, Warteschlange und Kreislauf."), Symbol.Art.LUPE);
         hilfe.addActionListener(e -> JOptionPane.showMessageDialog(this, Sprache.t("<html><div style='width:430px'>"
                 + "<b>Start</b> – plays what is set under <b>Mode</b> above (how often: <b>Number</b>). Stigmas and profiles "
                 + "are in this list too.<br><br>"
-                + "<b>Add after</b> – plans a <b>second</b> mode that starts by itself when the first one is done. "
-                + "How it works:<br>"
-                + "1. Choose a mode (e.g. Cathedral, 50) and press <b>Start</b>.<br>"
-                + "2. Choose the next mode (e.g. Dungeon, 10) and press <b>Add after</b>.<br>"
-                + "3. Done – first 50 cathedrals, then 10 dungeons. As many in a row as you like.<br><br>"
+                + "<b>Queue</b> – opens a window with up to <b>5 modes one after another</b>, each with all its settings "
+                + "(e.g. 1. Portal up to level 135, 2. Cathedral 50, 3. Dungeon 10). Press <b>Start</b> there – number 1 "
+                + "starts, the others follow by themselves. Lighthouse, colosseum, titan tower and clan war can be switched on "
+                + "in between, a stop time counts for the whole queue, and it can be saved as a profile.<br><br>"
                 + "<b>Loop</b> – your fixed routine without end: lighthouse, colosseum, cathedral, event, clan war …<br><br>"
                 + "<b>Loop (no event)</b> – the same, but WITHOUT the event: cathedral without end, lighthouse, colosseum, clan war "
                 + "and titan tower on the side.<br><br>"
@@ -423,11 +418,10 @@ final class Steuerfenster extends JFrame implements Steuerprogramm.Abmeldbar {
                 "<html><div style='width:430px'>"
                 + "<b>Start</b> – spielt, was oben bei <b>Modus</b> steht (wie oft: <b>Anzahl</b>). Auch Stigmas und Profile "
                 + "stehen in dieser Liste.<br><br>"
-                + "<b>Danach anhängen</b> – plant einen <b>zweiten</b> Modus, der von selbst startet, wenn der erste fertig ist. "
-                + "So geht's:<br>"
-                + "1. Modus wählen (z. B. Kathedrale, 50) und <b>Start</b> drücken.<br>"
-                + "2. Den nächsten Modus wählen (z. B. Verlies, 10) und <b>Danach anhängen</b> drücken.<br>"
-                + "3. Fertig – erst 50 Kathedralen, dann 10 Verliese. Beliebig viele hintereinander.<br><br>"
+                + "<b>Warteschlange</b> – öffnet ein Fenster mit bis zu <b>5 Modi nacheinander</b>, jeder mit allen Einstellungen "
+                + "(z. B. 1. Portal bis Level 135, 2. Kathedrale 50, 3. Verlies 10). Dort <b>Start</b> drücken – Nummer 1 "
+                + "startet, die anderen folgen von selbst. Leuchtturm, Kolosseum, Titanen-Turm und Clan-Krieg lassen sich "
+                + "zwischendurch einschalten, eine Endzeit gilt für die ganze Liste, und sie lässt sich als Profil speichern.<br><br>"
                 + "<b>Kreislauf</b> – dein fester Ablauf ohne Ende: Leuchtturm, Kolosseum, Kathedrale, Event, Clan-Krieg …<br><br>"
                 + "<b>Kreislauf ohne Event</b> – dasselbe, aber OHNE Event: Kathedrale ohne Ende, nebenbei Leuchtturm, Kolosseum, "
                 + "Clan-Krieg und Titanen-Turm.<br><br>"
@@ -458,10 +452,9 @@ final class Steuerfenster extends JFrame implements Steuerprogramm.Abmeldbar {
             for (JTextField f : new JTextField[]{portalL1, portalN1, portalL2, portalN2}) f.setEnabled(w == Befehlsbau.Modus.PORTAL);
             titan.setEnabled(w instanceof Befehlsbau.Stigma s && s != Befehlsbau.Stigma.LOESCHEN);
             anzahl.setEnabled(istModus && ((Befehlsbau.Modus) w).mitAnzahl);
-            danach.setEnabled(istModus);
             pcAus.setEnabled(istModus);
             vorschau.setText(w instanceof ProfilWahl pw ? Sprache.t("runs the profile “" + pw.name() + "”", "führt das Profil „" + pw.name() + "“ aus")
-                    : w instanceof Befehlsbau.Stigma s ? s.befehl(titanWort(), false) : startBefehl(false));
+                    : w instanceof Befehlsbau.Stigma s ? s.befehl(titanWort(), false) : startBefehl());
         };
         modus.addActionListener(e -> vorschauNeu.run());
         weg.addActionListener(e -> vorschauNeu.run());
@@ -559,10 +552,9 @@ final class Steuerfenster extends JFrame implements Steuerprogramm.Abmeldbar {
     /** Der eine Start-Knopf: Modus, Stigma-Auftrag oder Profil. */
     private void starten() {
         Object w = modus.getSelectedItem();
-        danachGemerkt.clear();   // ein neuer Start beginnt eine neue Kette
         if (w instanceof Befehlsbau.Modus) {
             mitspielerMerken();
-            steuer.senden(startBefehl(false), Sprache.t("Start button", "Knopf Start"));
+            steuer.senden(startBefehl(), Sprache.t("Start button", "Knopf Start"));
         } else if (w instanceof Befehlsbau.Stigma art) {
             String t = String.valueOf(titan.getSelectedItem());
             String befehl = art.befehl(titanWort(), false);
@@ -584,19 +576,35 @@ final class Steuerfenster extends JFrame implements Steuerprogramm.Abmeldbar {
         }
     }
 
-    /** Autor 24.10. (F35): die "Danach anhaengen"-Befehle seit dem letzten Start -- die Kette, die das Programm selbst geplant hat. */
-    private final List<String> danachGemerkt = new ArrayList<>();
     private DefaultListModel<String> profilModell;
 
+    /** Autor 15.11.: das Fenster "Warteschlange" -- einmal gebaut, danach nur wieder gezeigt (die Zeilen bleiben stehen). */
+    private Warteschlangenfenster warteschlange;
+
+    private void warteschlangeZeigen() {
+        if (warteschlange == null) {
+            warteschlange = new Warteschlangenfenster(this, steuer, () -> {
+                modusListeNeu();
+                if (profilModell != null) {
+                    for (String n : steuer.profile().namen()) if (!profilModell.contains(n)) profilModell.addElement(n);
+                }
+            });
+        }
+        warteschlange.profileNeu();
+        warteschlange.setVisible(true);
+        warteschlange.toFront();
+    }
+
     /**
-     * Autor 24.10. (F35): speichert die jetzige Auswahl (Start-Befehl) samt den "Danach"-Befehlen als Profil. Das Fenster zeigt die
-     * Befehle zum Nachsehen (und Aendern); der Name ist frei. Ein Profil gleichen Namens wird erst nach Rueckfrage ersetzt.
+     * Autor 24.10. (F35): speichert die jetzige Auswahl (Start-Befehl) als Profil. Das Fenster zeigt die Befehle zum Nachsehen
+     * (und Aendern); der Name ist frei. Ein Profil gleichen Namens wird erst nach Rueckfrage ersetzt. (Mehrere Modi nacheinander
+     * speichert seit 15.11. das Fenster Warteschlange.)
      */
     private void alsProfilSpeichern() {
         List<String> zeilen = new ArrayList<>();
         Object w = modus.getSelectedItem();
         if (w instanceof Befehlsbau.Modus) {
-            zeilen.add(startBefehl(false));
+            zeilen.add(startBefehl());
         } else if (w instanceof Befehlsbau.Stigma art) {
             zeilen.add(art.befehl(titanWort(), false));
         } else if (w instanceof ProfilWahl) {
@@ -605,7 +613,6 @@ final class Steuerfenster extends JFrame implements Steuerprogramm.Abmeldbar {
                     JOptionPane.INFORMATION_MESSAGE);
             return;
         }
-        zeilen.addAll(danachGemerkt);
         JTextField name = Holzstil.feld("", 20);
         JTextArea befehle = Holzstil.lesebereich();
         befehle.setEditable(true);
@@ -643,12 +650,10 @@ final class Steuerfenster extends JFrame implements Steuerprogramm.Abmeldbar {
 
     /** Das Titan-Wort fuer den Befehl ("" = Last Guardian). */
     private String titanWort() {
-        String t = String.valueOf(titan.getSelectedItem()).replaceAll("\\s*\\((Tank|Archer)\\)$", "");
-        return t.startsWith("Last") ? "" : t.startsWith("Keeper") ? "keeper" : t.startsWith("Thunder") ? "thunder"
-                : t.toLowerCase(java.util.Locale.ROOT);
+        return Warteschlange.titanWort(String.valueOf(titan.getSelectedItem()));
     }
 
-    private static final String MITSPIELER = "mitspieler.namen";
+    static final String MITSPIELER = "mitspieler.namen";   // auch im Fenster Warteschlange
 
     /** Alle Mitspieler, die schon einmal eingetragen wurden (Autor 14.10.: "beim Reinklicken alle Namen"). */
     private List<String> bekannteMitspieler() {
@@ -711,11 +716,10 @@ final class Steuerfenster extends JFrame implements Steuerprogramm.Abmeldbar {
         menue.show(freund, 0, freund.getHeight());
     }
 
-    private String startBefehl(boolean danach) {
+    private String startBefehl() {
         if (!(modus.getSelectedItem() instanceof Befehlsbau.Modus m)) return "";
         int n = Befehlsbau.zahl(anzahl.getText(), 1);
         String w = weg.getSelectedIndex() == 1 ? "b" : "c";
-        if (danach) return Befehlsbau.danach(m, n, w, null, freund.getText());
         List<String> extras = new ArrayList<>();
         if (m == Befehlsbau.Modus.PORTAL) extras.addAll(Befehlsbau.portalPlan(portalBis.getText(),
                 Befehlsbau.portalFarm(portalL1.getText(), portalN1.getText(), portalL2.getText(), portalN2.getText())));

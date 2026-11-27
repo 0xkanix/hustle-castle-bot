@@ -2510,7 +2510,7 @@ public final class EventMode implements GameMode {
     private void hammerMelden(Mat screen, BotContext ctx, boolean eingang) {
         long n = hammerPerTexterkennung(screen, ctx);
         String wann = eingang ? "beim Betreten" : "beim Verlassen";
-        Log.info("Event", "Haemmer " + wann + ": " + (n >= 0 ? String.valueOf(n) : "nicht lesbar"));
+        Log.info("Event", Sprache.t("Hammers ", "Haemmer ") + wann + ": " + (n >= 0 ? String.valueOf(n) : Sprache.t("not readable", "nicht lesbar")));
     }
 
     /**

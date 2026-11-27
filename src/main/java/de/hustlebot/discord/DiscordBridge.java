@@ -78,7 +78,28 @@ public final class DiscordBridge {
      * Ein Auftrag in der Warteschlange. freund ist leer bei zufaelligem
      * Mitspieler, sonst der Name aus "!start dungeon 10 friend Lisa".
      */
-    private record Auftrag(String modus, int runs, String weg, String freund, boolean warten) { }
+    record Auftrag(String modus, int runs, String weg, String freund, boolean warten,
+                   boolean eigen, String plan, de.hustlebot.core.Bezahlung.Art bezahl, Boolean kreislauf) {
+
+        /** Ein eingeschobener Auftrag (Clan-Krieg, Rest nach einem Einschub ...): es bleibt, was beim Start galt. */
+        Auftrag(String modus, int runs, String weg, String freund, boolean warten) {
+            this(modus, runs, weg, freund, warten, false, "", null, null);
+        }
+
+        Auftrag {
+            plan = plan == null ? "" : plan.trim();
+            freund = freund == null ? "" : freund;
+        }
+
+        /** Derselbe Auftrag mit anderer Rundenzahl (Arena-Rest nach einem Einschub). */
+        Auftrag mitRuns(int r) {
+            return new Auftrag(modus, r, weg, freund, warten, eigen, plan, bezahl, kreislauf);
+        }
+    }
+    // Autor 15.11. (Fenster "Warteschlange"): Ein selbst geplanter Eintrag (eigen = aus !start, !after oder !queue start)
+    // bringt seine Einstellungen mit -- den Portal-Plan ("bis 135 farm 80:2mio") bzw. den Stigma-Auftrag ("loeschen",
+    // "leveln medusa") in plan, dazu Bezahlart und Event-Kreislauf ja/nein. Sie gelten erst, wenn der Eintrag startet
+    // (naechstenStarten). Vorher galt ein Portal-Plan nur fuer !start und verfiel nach 2 min -- in der Warteschlange nie.
 
     /**
      * Was in einem Befehl nach "friend" steht -- und der Befehl ohne diesen
@@ -155,7 +176,8 @@ public final class DiscordBridge {
                 nachModus = true;
                 continue;
             }
-            if (wort.matches("(?i)\\d+x?") || FUELLWORT.matcher(wort).matches()) {
+            // 18.11.: "clan" ist kein Freund, sondern der Clan-Weg -- bleibt im Befehl stehen, weg() liest es.
+            if (wort.matches("(?i)\\d+x?") || FUELLWORT.matcher(wort).matches() || CLAN_WORT.matcher(wort).matches()) {
                 vorn.append(wort).append(' ');
                 continue;
             }
@@ -175,6 +197,9 @@ public final class DiscordBridge {
     private static final java.util.regex.Pattern FUELLWORT = java.util.regex.Pattern.compile(
             "(?i)x|mal|run|runs|runde|runden|times|durchlauf|durchlaeufe|durchläufe"
             + "|durchgang|durchgaenge|durchgänge|stueck|stück|bitte|please");
+
+    /** "clan" / "clanmate" / "clan-mate" im Verlies-Befehl: mit einem Clan-Mitglied spielen (18.11.). */
+    static final java.util.regex.Pattern CLAN_WORT = java.util.regex.Pattern.compile("(?i)clan|clanmate|clan-mate");
 
     /**
      * Prueft den Freund aus einem Befehl und sagt in Discord, was nicht passt.
@@ -794,7 +819,8 @@ public final class DiscordBridge {
                 + "keep 10 tickets · `!arenareport off` no line after each tournament · `!settings pay arena food` · "
                 + "`!glyphs` characters of player names without a letter · `!glyph 17 a` labels one\n\n"
                 + "📋 **Queue**  `!after dungeon 20` adds to the end · `!queue` shows it · "
-                + "`!queue clear` / `!queue del 2`\n\n"
+                + "`!queue clear` / `!queue del 2` · `!queue start cathedral 50 c | dungeon 10 | portal bis 135` "
+                + "several modes one after another\n\n"
                 + "⚔️ **Clan war & squad**  `!clanwar on` deploys by itself (" + Kriegsplan.zeitenText("/") + "), "
                 + "`!clanwar off` leaves it alone · `!settings` Deploy the best or Previous Squad per mode\n\n"
                 + "👀 **Look in**  `!status` · `!stats` (`!stats 10` every 10 min, `!stats off`) · "
@@ -846,7 +872,8 @@ public final class DiscordBridge {
                 + "10 Tickets aufheben · `!arenabericht aus` keine Zeile nach jedem Turnier · `!settings bezahlen arena food` · "
                 + "`!glyphen` Zeichen in Spielernamen ohne Buchstaben · `!glyphe 17 a` beschriftet eines\n\n"
                 + "📋 **Warteschlange**  `!after dungeon 20` hängt hinten an · `!queue` zeigt sie · "
-                + "`!queue clear` / `!queue del 2`\n\n"
+                + "`!queue clear` / `!queue del 2` · `!queue start cathedral 50 c | dungeon 10 | portal bis 135` "
+                + "mehrere Modi nacheinander\n\n"
                 + "⚔️ **Clan-Krieg & Aufstellung**  `!clanwar on` stellt von selbst auf "
                 + "(" + Kriegsplan.zeitenText("/") + "), `!clanwar off` lässt ihn in Ruhe · `!settings` je Modus "
                 + "Deploy the best oder Previous Squad\n\n"
@@ -886,33 +913,20 @@ public final class DiscordBridge {
         // Event-Ablauf (29.09.): "!start eventablauf" = Kathedrale im Kreislauf (Schluessel ->
         // Kisten -> Hammer-Event -> Verlies), "ohneevent" = nur Kathedrale. Ohne Wort gilt
         // der Schalter unter !settings.
-        Boolean kreislauf = null;
-        de.hustlebot.core.Bezahlung.Art bezahlArt = null;
         // Portal-Plan (Autor 23.10.): "!start portal bis 135 farm 80:2mio,135:2mio,130:1,5mio" -- vor allem anderen
         // abtrennen, damit die Zahlen nicht als Rundenzahl oder Mitspieler gelesen werden.
+        // Autor 15.11.: nur abtrennen -- gesetzt wird der Plan erst, wenn der Portal-Auftrag wirklich startet (naechstenStarten).
+        // Vorher verfiel er nach 2 min, wenn zuerst das eigene Team dran war.
+        String portalPlan = "";
         if (rest != null && rest.toLowerCase(java.util.Locale.ROOT).contains("portal")) {
-            rest = de.hustlebot.bot.PortalMode.planAusText(rest);
+            String[] mitPlan = portalPlanAbtrennen(rest);
+            rest = mitPlan[0];
+            portalPlan = mitPlan[1];
         }
-        StringBuilder uebrig = new StringBuilder();
-        for (String w : (rest == null ? "" : rest.trim()).split("\\s+")) {
-            String k = w.toLowerCase(java.util.Locale.ROOT);
-            // Bezahlart fuer diesen Auftrag (29.09.): tickets | food | tickets+food | all/alles | food+chests
-            // (Mia 21.10.: food+chests = Nahrung, dann Nahrungskisten, nie Tickets)
-            if (k.matches("tickets|keys|schluessel|schlüssel|food|nahrung|essen|tickets\\+food|alles|all|food\\+chests?|food\\+kisten|nahrung\\+kisten|essen\\+kisten")) {
-                bezahlArt = de.hustlebot.core.Bezahlung.ausWort(k.equals("all") ? "alles" : k.matches("keys|schluessel|schlüssel") ? "tickets"
-                        : k.matches("nahrung|essen") ? "food" : k);
-                continue;
-            }
-            if (k.matches("eventablauf|event-ablauf|eventloop|event-loop|kreislauf")) {
-                kreislauf = Boolean.TRUE;
-                w = "cathedral";
-            } else if (k.matches("ohneevent|ohne-event|noevent|no-event|nurkathedrale|onlycathedral")) {
-                kreislauf = Boolean.FALSE;
-                continue;
-            }
-            uebrig.append(uebrig.length() == 0 ? "" : " ").append(w);
-        }
-        rest = uebrig.toString();
+        Zusaetze zusaetze = zusaetzeAbtrennen(rest);
+        Boolean kreislauf = zusaetze.kreislauf();
+        de.hustlebot.core.Bezahlung.Art bezahlArt = zusaetze.bezahl();
+        rest = zusaetze.rest();
         FreundAngabe freundAngabe = freundAbtrennen(rest);
         if (!freundAngabe.genannt()) freundAngabe = freundOhneWort(rest);
         rest = freundAngabe.rest();
@@ -949,6 +963,7 @@ public final class DiscordBridge {
 
         de.hustlebot.core.Eventautomatik.fuerAuftrag(kreislauf);
         de.hustlebot.core.Bezahlung.auftragBeginnt(bezahlArt);
+        alteEndzeitLoeschen();
         // Frischer Start: die Zaehler fuer !stats fangen wieder bei null an.
         de.hustlebot.core.Energieplan.zaehlerZuruecksetzen();
         de.hustlebot.core.Laufzaehler.zuruecksetzen();
@@ -966,8 +981,8 @@ public final class DiscordBridge {
                 kette.add(new Auftrag("teamscan", 1, "c", "", false));
                 teamAngestossenUm = System.currentTimeMillis();
             }
-            kette.add(new Auftrag(modus, runs, weg(rest), freund,
-                    !freund.isEmpty() && freundAngabe.warten()));
+            kette.add(new Auftrag(modus, runs, weg(rest), freund, !freund.isEmpty() && freundAngabe.warten(),
+                    true, "portal".equals(modus) ? portalPlan : "", bezahlArt, kreislauf));
         }
         if (teamZuerst) {
             client.sendCard(Sprache.t("First: your team", "Erst: dein Team"),
@@ -979,46 +994,325 @@ public final class DiscordBridge {
     }
 
     private void anhaengen(String rest) {
-        FreundAngabe freundAngabe = freundAbtrennen(rest);
-        if (!freundAngabe.genannt()) freundAngabe = freundOhneWort(rest);
-        rest = freundAngabe.rest();
-        String modus = modusAus(rest);
-        if (modus == null || "clanwar".equals(modus)) {
+        // Autor 15.11.: derselbe Leser wie "!queue start" -- damit geht auch "!after portal bis 135 farm 80:2mio" (der Plan
+        // gilt, sobald der Eintrag startet), dazu Bezahlart, Kreislauf und "!after stigmas loeschen".
+        Eintragstext e = eintragLesen(rest);
+        if (e.modus() == null || "clanwar".equals(e.modus())) {
             client.send(Sprache.t("Which mode? The clan war is queued by itself. Try `!after dungeon 20`.",
                     "Welcher Modus? Der Clan-Krieg reiht sich von selbst ein. Versuch `!after dungeon 20`."));
             return;
         }
-        // Code-Review 23.10.: "!after portal bis 135 farm ..." machte aus "135" die Rundenzahl des alten Level-80-Autokampfs.
-        if ("portal".equals(modus) && rest.matches("(?is).*\\b(bis|farm)\\b.*")) {
-            client.send(Sprache.t("A portal plan (bis/farm) only works with `!start portal ...`.",
-                    "Ein Portal-Plan (bis/farm) geht nur mit `!start portal ...`."));
-            return;
-        }
-        String freund = freundPruefen(freundAngabe, modus, "after");
-        if (freund == null) return;
-        if ("grabung".equals(modus) && titanVorlagenFehlen()) return;
-        if ("arena".equals(modus) && arenaNameFehlt()) return;
-        int runs = Math.max(1, zahlAus(rest));
-        if (laeuftBisLeer(modus) && zahlAus(rest) <= 0) runs = BIS_LEER;
+        Auftrag a = eintragPruefen(e, "after", 0);
+        if (a == null) return;
 
         synchronized (kette) {
-            if (kette.size() >= 10) {
+            if (kette.size() >= KETTE_MAX) {
                 client.send(Sprache.t("The queue is full (ten entries).", "Die Warteschlange ist voll (zehn Einträge)."));
                 return;
             }
-            kette.add(new Auftrag(modus, runs, weg(rest), freund,
-                    !freund.isEmpty() && freundAngabe.warten()));
+            kette.add(a);
         }
-        client.sendCard(Sprache.t("Queued", "In der Warteschlange"), "**" + modusName(modus) + "** x" + runs
-                + (freund.isEmpty() ? "" : Sprache.t(" with ", " mit ") + freund)
-                + (!freund.isEmpty() && freundAngabe.warten() ? Sprache.t(" (waits for the invitation)", " (wartet auf die Einladung)") : "")
-                + Sprache.t(" runs as soon as the current one is done.", " läuft, sobald das Laufende fertig ist."),
+        boolean steht = engine.state() != BotEngine.State.LAEUFT && engine.state() != BotEngine.State.PAUSIERT;
+        client.sendCard(Sprache.t("Queued", "In der Warteschlange"), "**" + eintragText(a) + "**"
+                + (a.warten() ? Sprache.t(" (waits for the invitation)", " (wartet auf die Einladung)") : "")
+                // Ein einzelnes !after bei stehendem Bot startet gleich (es laeuft ja nichts) -- das jetzt auch sagen.
+                + (steht ? Sprache.t(" -- nothing was running, so it starts now. Several modes in a row: `!queue start A | B | C`.",
+                                     " -- es lief nichts, darum startet es jetzt. Mehrere Modi nacheinander: `!queue start A | B | C`.")
+                         : Sprache.t(" runs as soon as the current one is done.", " läuft, sobald das Laufende fertig ist.")),
                 DiscordClient.FARBE_INFO);
 
-        if (engine.state() != BotEngine.State.LAEUFT
-                && engine.state() != BotEngine.State.PAUSIERT) {
+        if (steht) {
+            alteEndzeitLoeschen();
             naechstenStarten(true);
         }
+    }
+
+    // ------------------------------------------------------------------
+    //  Warteschlange am Stueck (Autor 15.11., Fenster "Warteschlange")
+    // ------------------------------------------------------------------
+
+    /** Hoechstens so viele Auftraege in der Kette (wie bisher bei !after). */
+    private static final int KETTE_MAX = 10;
+
+    /** Was ein Auftrag ausser Modus, Zahl und Mitspieler sagt: Bezahlart und Event-Kreislauf ja/nein -- und der Rest ohne diese Woerter. */
+    record Zusaetze(String rest, de.hustlebot.core.Bezahlung.Art bezahl, Boolean kreislauf) { }
+
+    /**
+     * Bezahlart fuer diesen Auftrag (29.09.): tickets | food | tickets+food | all/alles | food+chests (Mia 21.10.: food+chests =
+     * Nahrung, dann Nahrungskisten, nie Tickets). Event-Ablauf (29.09.): "eventablauf" = Kathedrale im Kreislauf, "ohneevent" =
+     * nur Kathedrale; ohne Wort gilt der Schalter unter !settings.
+     */
+    static Zusaetze zusaetzeAbtrennen(String rest) {
+        Boolean kreislauf = null;
+        de.hustlebot.core.Bezahlung.Art bezahlArt = null;
+        StringBuilder uebrig = new StringBuilder();
+        for (String w : (rest == null ? "" : rest.trim()).split("\\s+")) {
+            String k = w.toLowerCase(java.util.Locale.ROOT);
+            if (k.matches("tickets|keys|schluessel|schlüssel|food|nahrung|essen|tickets\\+food|alles|all|food\\+chests?|food\\+kisten|nahrung\\+kisten|essen\\+kisten")) {
+                bezahlArt = de.hustlebot.core.Bezahlung.ausWort(k.equals("all") ? "alles" : k.matches("keys|schluessel|schlüssel") ? "tickets"
+                        : k.matches("nahrung|essen") ? "food" : k);
+                continue;
+            }
+            if (k.matches("eventablauf|event-ablauf|eventloop|event-loop|kreislauf")) {
+                kreislauf = Boolean.TRUE;
+                w = "cathedral";
+            } else if (k.matches("ohneevent|ohne-event|noevent|no-event|nurkathedrale|onlycathedral")) {
+                kreislauf = Boolean.FALSE;
+                continue;
+            }
+            uebrig.append(uebrig.length() == 0 ? "" : " ").append(w);
+        }
+        return new Zusaetze(uebrig.toString(), bezahlArt, kreislauf);
+    }
+
+    /**
+     * Die Plan-Woerter eines Portal-Auftrags ("bis 135", "farm 80:2mio,135:2mio") abtrennen, OHNE den Plan zu setzen -- dieselben
+     * Woerter wie PortalMode.planAusText. Zurueck: {Rest, Plan}; der Plan ist leer, wenn keine Plan-Woerter dastehen.
+     */
+    static String[] portalPlanAbtrennen(String text) {
+        StringBuilder rest = new StringBuilder(), plan = new StringBuilder();
+        String[] w = (text == null ? "" : text.trim()).split("\\s+");
+        for (int i = 0; i < w.length; i++) {
+            String k = w[i].toLowerCase(java.util.Locale.ROOT);
+            boolean ziel = k.matches("bis|ziel|to|until|bislevel") && i + 1 < w.length && w[i + 1].matches("\\d{1,3}");
+            boolean farm = k.matches("farm|farmen|danach") && i + 1 < w.length;
+            if (ziel || farm) {
+                plan.append(plan.length() == 0 ? "" : " ").append(ziel ? "bis" : "farm").append(' ').append(w[++i]);
+                continue;
+            }
+            rest.append(rest.length() == 0 ? "" : " ").append(w[i]);
+        }
+        return new String[]{rest.toString(), plan.toString()};
+    }
+
+    /** Ein Eintrag aus "!queue start A | B" oder "!after ...", ohne Nebenwirkungen gelesen. fehler != null: nicht verstanden. */
+    record Eintragstext(String modus, int runs, String weg, FreundAngabe freund, String plan,
+                        de.hustlebot.core.Bezahlung.Art bezahl, Boolean kreislauf, String fehler) { }
+
+    private static final java.util.regex.Pattern STIGMA_EINTRAG = java.util.regex.Pattern.compile("(?is)^!?\\s*stigmas?(?:\\s+(.*))?$");
+
+    /**
+     * Liest einen Eintrag wie "cathedral 50 c food noevent", "dungeon 10 bob,alice", "portal bis 135 farm 80:2mio" oder
+     * "stigmas leveln medusa" -- wie !start, aber ohne etwas zu setzen. Ob Mitspieler-Bilder und Vorlagen passen,
+     * prueft danach eintragPruefen.
+     */
+    static Eintragstext eintragLesen(String text) {
+        String t = text == null ? "" : text.trim();
+        FreundAngabe keiner = new FreundAngabe("", "", false, false);
+        java.util.regex.Matcher st = STIGMA_EINTRAG.matcher(t);
+        if (st.matches()) {
+            String plan = st.group(1) == null ? "" : st.group(1).trim().toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
+            return new Eintragstext("stigmas", 1, "a", keiner, plan, null, null, plan.isEmpty()
+                    ? Sprache.t("Which stigma job? e.g. `stigmas delete` or `stigmas level medusa`.",
+                                "Welcher Stigma-Auftrag? z. B. `stigmas loeschen` oder `stigmas leveln medusa`.") : null);
+        }
+        if (t.startsWith("!")) t = t.substring(1).trim();
+        t = t.replaceFirst("(?i)^(start|after)\\s+", "");
+        String[] mitPlan = t.toLowerCase(Locale.ROOT).contains("portal") ? portalPlanAbtrennen(t) : new String[]{t, ""};
+        Zusaetze z = zusaetzeAbtrennen(mitPlan[0]);
+        String rest = z.rest();
+        FreundAngabe f = freundAbtrennen(rest);
+        if (!f.genannt()) f = freundOhneWort(rest);
+        rest = f.rest();
+        String modus = modusAus(rest);
+        if (modus == null) {
+            return new Eintragstext(null, 0, "a", f, "", null, null,
+                    Sprache.t("Which mode? `" + t + "` -- try e.g. `dungeon 10`.", "Welcher Modus? `" + t + "` -- z. B. `dungeon 10`."));
+        }
+        de.hustlebot.core.Bezahlung.Art bezahl = z.bezahl();
+        // Arena mit Aepfeln (Hauptbot 25.09.): "arena 10 aepfel" / "apples" / "futter" ... wie "food".
+        if (bezahl == null && "arena".equals(modus) && mitEssen(rest)) bezahl = de.hustlebot.core.Bezahlung.ausWort("food");
+        int zahl = zahlAus(rest);
+        int runs = Math.max(1, zahl);
+        if (zahl <= 0 && bisLeer(modus, z.kreislauf())) runs = BIS_LEER;
+        return new Eintragstext(modus, runs, weg(rest), f, "portal".equals(modus) ? mitPlan[1] : "", bezahl, z.kreislauf(), null);
+    }
+
+    /** Wie laeuftBisLeer, aber fuer einen Eintrag, der erst spaeter startet: sein eigenes Kreislauf-Wort, sonst der Schalter. */
+    static boolean bisLeer(String modus, Boolean kreislauf) {
+        return "event".equals(modus) || "grabung".equals(modus)
+                || ("cathedral".equals(modus) && (kreislauf != null ? kreislauf : de.hustlebot.core.Eventautomatik.schalterAn()));
+    }
+
+    /** "A | B | C" in die Eintraege zerlegen; leere fallen weg. */
+    static List<String> warteschlangeTeilen(String text) {
+        List<String> l = new ArrayList<>();
+        for (String t : (text == null ? "" : text).split("\\s*\\|\\s*")) {
+            if (!t.isBlank()) l.add(t.trim());
+        }
+        return l;
+    }
+
+    /**
+     * Neue Eintraege einreihen. Steht der Bot, SIND sie die Kette (alte Reste fallen weg, wie bei !start) und der erste startet
+     * gleich (true). Laeuft er, kommen sie hinten an und folgen nacheinander (false).
+     */
+    static <T> boolean einreihen(List<T> kette, List<T> neu, boolean botLaeuft) {
+        if (botLaeuft) {
+            kette.addAll(neu);
+            return false;
+        }
+        kette.clear();
+        kette.addAll(neu);
+        return !kette.isEmpty();
+    }
+
+    /** Ist die Uhrzeit aus !ende/!off erreicht? Dann endet die ganze Warteschlange, nicht nur der laufende Eintrag. */
+    static boolean stoppzeitErreicht(long stoppUm, long jetzt) {
+        return stoppUm > 0 && jetzt >= stoppUm;
+    }
+
+    /**
+     * Endet mit diesem Ende die ganze Warteschlange (kein naechster Eintrag, keine Folge, kein weiterer Einschub)? Ja, wenn
+     * die Endzeit erreicht ist ODER der Motor selbst wegen der Zeitgrenze aufgehoert hat -- Autor 18.11.: "!ende 18:50"
+     * wirkte nicht ueber den Moduswechsel hinweg. Eine Endzeit in der Zukunft haelt nichts an.
+     */
+    static boolean endzeitBeendetKette(long stoppUm, long jetzt, boolean motorDurchZeitgrenze) {
+        return motorDurchZeitgrenze || stoppzeitErreicht(stoppUm, jetzt);
+    }
+
+    /**
+     * Steht schon ein Clan-Krieg in der Kette, der die automatischen Einschuebe sperren soll: der laufende (vorn) oder ein von selbst
+     * eingeschobener. Pruefung 15.11.: Eine selbst geplante Zeile "Clan-Krieg" weiter hinten in der Warteschlange zaehlt nicht --
+     * sonst kam bis zu ihr kein Krieg zur Kriegszeit und kein Leuchtturm, Kolosseum oder Turm mehr dazwischen.
+     * Aufruf in synchronized (kette).
+     */
+    static boolean kriegEingereiht(List<Auftrag> kette) {
+        for (int i = 0; i < kette.size(); i++) {
+            Auftrag a = kette.get(i);
+            if ("clanwar".equals(a.modus()) && (i == 0 || !a.eigen())) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Eine schon vergangene Endzeit (der Bot stand, als sie kam) vor einem neuen Start loeschen -- sonst hoerte der neue Lauf
+     * nach dem ersten Durchlauf auf und die Warteschlange gleich mit.
+     */
+    private void alteEndzeitLoeschen() {
+        if (stoppzeitErreicht(engine.stopAtMillis(), System.currentTimeMillis())) {
+            Log.info("Warteschlange", Sprache.t("Old stop time " + engine.stopAtClock() + " has passed -- removed before the new start.",
+                    "Alte Endzeit " + engine.stopAtClock() + " ist vorbei -- vor dem neuen Start geloescht."));
+            engine.setStopAtClock("");
+        }
+    }
+
+    /** Portal: den Plan des Eintrags setzen, gleich bevor er startet (ohne Plan: leeren, wie "!start portal"). */
+    static void portalPlanAnwenden(Auftrag a) {
+        if ("portal".equals(a.modus()) && !"fortsetzung".equals(a.weg())) {
+            de.hustlebot.bot.PortalMode.planAusText("portal " + a.plan());
+        }
+    }
+
+    /** Ein Eintrag fuer Menschen: "Portal (bis 135 farm 80:2mio)", "Kathedrale x50", "Event (bis leer)", "Stigmas (loeschen)". */
+    static String eintragText(Auftrag a) {
+        StringBuilder b = new StringBuilder(modusName(a.modus()));
+        if (a.runs() >= BIS_LEER) b.append(Sprache.t(" (until empty)", " (bis leer)"));
+        else if (a.runs() > 1) b.append(" x").append(a.runs());
+        if (!a.plan().isEmpty()) b.append(" (").append(a.plan()).append(')');
+        if ("cathedral".equals(a.modus()) && !"a".equals(a.weg()) && !"fortsetzung".equals(a.weg())) b.append(' ').append(a.weg());
+        if (!a.freund().isEmpty()) b.append(Sprache.t(" with ", " mit ")).append(a.freund());
+        if ("clan".equals(mitspielerWort(a))) b.append(Sprache.t(" with a clan mate", " mit Clan-Mitglied"));
+        if (a.bezahl() != null) b.append(" · ").append(a.bezahl().wort);
+        if (a.kreislauf() != null) b.append(" · ").append(a.kreislauf() ? Sprache.t("event loop", "Event-Kreislauf") : Sprache.t("no event", "ohne Event"));
+        return b.toString();
+    }
+
+    /**
+     * Prueft einen gelesenen Eintrag wie !start: Mitspieler-Bild, Vorlagen, Stigma-Woerter. Null = geht nicht (schon
+     * gemeldet). nr > 0: die Nummer in der Warteschlange fuer die Meldung.
+     */
+    private Auftrag eintragPruefen(Eintragstext e, String befehl, int nr) {
+        String wo = nr > 0 ? Sprache.t("Entry " + nr + ": ", "Eintrag " + nr + ": ") : "";
+        if (e.fehler() != null) {
+            client.sendCard(Sprache.t("Queue", "Warteschlange"), wo + e.fehler(), DiscordClient.FARBE_WARNUNG);
+            return null;
+        }
+        if ("stigmas".equals(e.modus())) {
+            Boolean ok = stigmaAuftrag(e.plan(), Stigmalauf.PRUEFEN);
+            if (ok == null) {
+                client.sendCard(Sprache.t("Queue", "Warteschlange"), wo + Sprache.t("`stigmas " + e.plan() + "` cannot be queued. Possible: "
+                                + "`stigmas delete`, `stigmas level <titan>`, `stigmas 100 <titan>`.",
+                                "`stigmas " + e.plan() + "` geht nicht in die Warteschlange. Moeglich: `stigmas loeschen`, "
+                                + "`stigmas leveln <Titan>`, `stigmas hundert <Titan>`."), DiscordClient.FARBE_WARNUNG);
+            }
+            return Boolean.TRUE.equals(ok) ? new Auftrag("stigmas", 1, "a", "", false, true, e.plan(), null, null) : null;
+        }
+        String freund = freundPruefen(e.freund(), e.modus(), befehl);
+        if (freund == null) return null;
+        if ("grabung".equals(e.modus()) && titanVorlagenFehlen()) return null;
+        if ("arena".equals(e.modus()) && arenaNameFehlt()) return null;
+        return new Auftrag(e.modus(), e.runs(), e.weg(), freund, !freund.isEmpty() && e.freund().warten(),
+                true, e.plan(), e.bezahl(), e.kreislauf());
+    }
+
+    /**
+     * "!queue start cathedral 50 c | dungeon 10 | portal bis 135 farm 80:2mio" (Knopf "Start" im Fenster Warteschlange): die
+     * ganze Liste auf einmal. Erst wird JEDER Eintrag geprueft -- passt einer nicht, passiert gar nichts. Steht der Bot, startet
+     * der erste gleich und die anderen folgen der Reihe nach; laeuft er, kommen alle hinter den laufenden Modus.
+     * Eine Endzeit (!ende 06:30) gilt fuer die ganze Liste (zustandPruefen).
+     */
+    private void warteschlangeStarten(String text) {
+        List<String> teile = warteschlangeTeilen(text);
+        if (teile.isEmpty()) {
+            client.send(Sprache.t("Several modes one after another: `!queue start cathedral 50 c | dungeon 10 | portal bis 135 farm 80:2mio`.",
+                    "Mehrere Modi nacheinander: `!queue start cathedral 50 c | dungeon 10 | portal bis 135 farm 80:2mio`."));
+            return;
+        }
+        List<Auftrag> neu = new ArrayList<>();
+        for (int i = 0; i < teile.size(); i++) {
+            Auftrag a = eintragPruefen(eintragLesen(teile.get(i)), "queue start", i + 1);
+            if (a == null) {
+                client.send(Sprache.t("Nothing was started or queued -- please change entry " + (i + 1) + ".",
+                        "Es wurde nichts gestartet oder eingereiht -- bitte Eintrag " + (i + 1) + " ändern."));
+                return;
+            }
+            neu.add(a);
+        }
+        boolean laeuft = engine.state() == BotEngine.State.LAEUFT || engine.state() == BotEngine.State.PAUSIERT;
+        boolean jetzt, teamZuerst;
+        synchronized (kette) {
+            // Laeuft etwas, das nicht in der Kette steht (selten), haelt ein Platzhalter seinen Platz -- sonst fiele beim FERTIG
+            // der erste neue Eintrag weg statt des laufenden.
+            if (laeuft && kette.isEmpty()) {
+                var t = engine.tracker();
+                String m = engine.lastModeId();
+                kette.add(new Auftrag(m == null ? "" : m, t == null ? 1 : Math.max(1, t.targetRuns()), "a", "", false));
+            }
+            if ((laeuft ? kette.size() : 0) + neu.size() > KETTE_MAX) {
+                client.send(Sprache.t("The queue would be too long (at most ten entries) -- nothing was queued.",
+                        "Die Warteschlange waere zu lang (hoechstens zehn Einträge) -- es wurde nichts eingereiht."));
+                return;
+            }
+            jetzt = einreihen(kette, neu, laeuft);
+            // Wie !start: ist das eigene Team dran (erster Start, danach alle 3 Tage), kommt es ganz nach vorn.
+            teamZuerst = jetzt && !"teamscan".equals(neu.get(0).modus()) && MeinTeam.scanFaellig() && teamVorlagenDa();
+            if (teamZuerst) {
+                kette.add(0, new Auftrag("teamscan", 1, "c", "", false));
+                teamAngestossenUm = System.currentTimeMillis();
+            }
+        }
+        if (jetzt) {
+            alteEndzeitLoeschen();
+            // Frischer Start wie bei !start: die Zaehler fuer !stats fangen wieder bei null an.
+            de.hustlebot.core.Energieplan.zaehlerZuruecksetzen();
+            de.hustlebot.core.Laufzaehler.zuruecksetzen();
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < neu.size(); i++) sb.append(i + 1).append(". ").append(eintragText(neu.get(i))).append('\n');
+        sb.append('\n').append(jetzt
+                ? (teamZuerst ? Sprache.t("First your team, then number 1 -- the others follow one after another.",
+                                          "Erst dein Team, dann Nummer 1 -- die anderen folgen der Reihe nach.")
+                              : Sprache.t("Number 1 starts now, the others follow one after another.",
+                                          "Nummer 1 startet jetzt, die anderen folgen der Reihe nach."))
+                : Sprache.t("The bot is busy: they follow the running mode, one after another.",
+                            "Der Bot ist beschaeftigt: sie folgen dem laufenden Modus, einer nach dem anderen."));
+        if (engine.stopAtMillis() > System.currentTimeMillis()) {
+            sb.append(Sprache.t("\nStop time **" + engine.stopAtClock() + "** counts for the whole queue.",
+                                "\nEndzeit **" + engine.stopAtClock() + "** gilt fuer die ganze Warteschlange."));
+        }
+        client.sendCard(Sprache.t("Queue", "Warteschlange"), sb.toString(), DiscordClient.FARBE_START);
+        if (jetzt) naechstenStarten(true);
     }
 
     // ------------------------------------------------------------------
@@ -1266,6 +1560,7 @@ public final class DiscordBridge {
 
     /** Ueber die Warteschlange starten wie "!start" (StigmaMode.naechsterStart ist schon gesetzt). */
     private void stigmaStarten() {
+        alteEndzeitLoeschen();   // Pruefung 15.11.: sonst brach eine laengst vergangene Endzeit den Stigma-Lauf nach 8 min ab
         synchronized (kette) {
             kette.clear();
             kette.add(new Auftrag("stigmas", 1, "a", "", false));
@@ -1287,6 +1582,19 @@ public final class DiscordBridge {
      * vorher kaufte "!stigmas leveln medusa" ungefragt Raenge. Level 100 hat keinen Probelauf.
      */
     private void commandStigmas(String rest) {
+        if (Boolean.TRUE.equals(stigmaAuftrag(rest, Stigmalauf.VON_HAND))) stigmaStarten();
+    }
+
+    /**
+     * Wie ein Stigma-Auftrag gelesen wird (Autor 15.11., Warteschlange): VON_HAND = "!stigmas ..." wie bisher; PRUEFEN = beim
+     * Einreihen nur nachsehen, ob es ein Start ist (Fehler werden gemeldet, nichts gesetzt); ANWENDEN = der Eintrag ist dran,
+     * die Einstellungen fuer den Lauf setzen (StigmaMode.naechsterStart), ohne die Warteschlange anzufassen.
+     */
+    private enum Stigmalauf { VON_HAND, PRUEFEN, ANWENDEN }
+
+    /** True = ein Start ist vorbereitet (bzw. waere es); false = geht nicht (schon gemeldet); null = kein Start-Wort. */
+    private Boolean stigmaAuftrag(String rest, Stigmalauf lauf) {
+        boolean vonHand = lauf == Stigmalauf.VON_HAND;
         String r = rest == null ? "" : rest.trim().toLowerCase(java.util.Locale.ROOT);
         String[] worte = r.isEmpty() ? new String[0] : r.split("[\\s,]+");
         String was = worte.length == 0 ? null : Befehlsnamen.wahl(worte[0], STIGMA_WOERTER);
@@ -1313,7 +1621,7 @@ public final class DiscordBridge {
                                     + "really delete: `!stigmas delete`.",
                             "Das Wort `" + worte[i] + "` kenne ich nicht -- es wird nichts geloescht. Probelauf: "
                                     + "`!stigmas loeschen probe`, wirklich loeschen: `!stigmas loeschen`."), DiscordClient.FARBE_WARNUNG);
-                    return;
+                    return false;
                 }
             }
             // Freunde (Pruefung 11.10.): Wird kein Set behalten (Formular ohne Haken, leere Zeile "behalten="), zerlegt der
@@ -1325,9 +1633,10 @@ public final class DiscordBridge {
                         "Es wird kein Set behalten (`!stigmas einstellen`) -- dann wuerden ALLE Stigmas mit Level 1-79 "
                                 + "zerlegt, auch Bull, Dragon und Wolf. Es wird nichts geloescht. Wenn das wirklich so sein soll: "
                                 + "`!stigmas loeschen alles`."), DiscordClient.FARBE_WARNUNG);
-                return;
+                return false;
             }
-            if (!stigmaFrei()) return;
+            if (vonHand && !stigmaFrei()) return false;
+            if (lauf == Stigmalauf.PRUEFEN) return true;
             de.hustlebot.bot.StigmaMode.naechsterStart(probe);
             client.sendCard("Stigmas", probe
                     ? Sprache.t("Dry run: going through the list, nothing is deleted.",
@@ -1336,8 +1645,7 @@ public final class DiscordBridge {
                                 + "The game must be in English.",
                                 "Ich loesche alle Stigmas mit Level 1-79, ausser: " + behalten + ". "
                                 + "Das Spiel muss auf Englisch stehen."), DiscordClient.FARBE_INFO);
-            stigmaStarten();
-            return;
+            return true;
         }
         // Titan (Hauptbot 11.10. 03:45: "!stigmas leveln keeper", "... sternenwaechter", "... torturer"). Freunde: alles
         // hinter dem ersten Wort ausser Probe-Woertern und den Schaltern "ab <Sorte>" / "ohne 100" ist der Titan-Name.
@@ -1411,28 +1719,29 @@ public final class DiscordBridge {
                         "Fuer Level 100 gibt es keinen Probelauf -- es werden wirklich Strahlen und Stones of Creation verbraucht. "
                                 + "Es wird nichts gestartet. Wenn es wirklich losgehen soll: derselbe Befehl ohne `probe`."),
                         DiscordClient.FARBE_WARNUNG);
-                return;
+                return false;
             }
             if (unbekannt != null) {
                 stigmaNachfragen(unbekannt, titanName, fund != null, true);
-                return;
+                return false;
             }
-            if (!stigmaFrei()) return;
+            if (vonHand && !stigmaFrei()) return false;
+            if (lauf == Stigmalauf.PRUEFEN) return true;
             de.hustlebot.bot.StigmaMode.naechsterStart(false, true, 0, titanKey, true, false, true);
             client.sendCard("Stigmas", Sprache.t(titanName + ": bringing the equipped stigmas as close to level 100 as possible "
                                                  + "(power rays + Stones of Creation). The game must be in English.",
                                                  titanName + ": die eingesetzten Stigmas so weit wie moeglich auf Level 100 "
                                                  + "(Strahlen + Stones of Creation). Das Spiel muss auf Englisch stehen."),
                     DiscordClient.FARBE_INFO);
-            stigmaStarten();
-            return;
+            return true;
         }
         if ("leveln".equals(was)) {
             if (unbekannt != null) {
                 stigmaNachfragen(unbekannt, titanName, fund != null, false);
-                return;
+                return false;
             }
-            if (!stigmaFrei()) return;
+            if (vonHand && !stigmaFrei()) return false;
+            if (lauf == Stigmalauf.PRUEFEN) return true;
             // Freunde (Pruefung 11.10.): Level 100 (Strahlen + Stones of Creation) bei JEDEM Titan nur mit "100"/"hundert"
             // -- vorher machte "!stigmas leveln medusa" es ungefragt. Jede Kachel wird angesehen; "markiert" = nur die ab
             // Level 2 (Autors Weg bei seinen anderen Titanen).
@@ -1453,9 +1762,10 @@ public final class DiscordBridge {
                                 + "Creation so weit wie moeglich hoch.") : ""))
                     + (nurMarkierte ? Sprache.t(" Only tiles from level 2 (marked).", " Nur Kacheln ab Level 2 (markiert).") : "")
                     + Sprache.t(" The game must be in English.", " Das Spiel muss auf Englisch stehen."), DiscordClient.FARBE_INFO);
-            stigmaStarten();
-            return;
+            return true;
         }
+        // Aus der Warteschlange: nur loeschen, leveln und hundert sind ein Start -- nichts umstellen, keine Karte.
+        if (!vonHand) return null;
         if ("standard".equals(was)) {
             de.hustlebot.core.Stigmaplan.standard();
             Log.info("Einstellungen", Sprache.t("Stigmas: back to the standard rules.", "Stigmas: zurueck auf die Standard-Regeln."));
@@ -1481,6 +1791,7 @@ public final class DiscordBridge {
                         new String[]{Sprache.t("🔍 Level – dry run", "🔍 Leveln – Probelauf"), "!stigmas leveln probe"},
                         new String[]{Sprache.t("🗑️ Delete – dry run", "🗑️ Loeschen – Probelauf"), "!stigmas loeschen probe"},
                         new String[]{Sprache.t("↩️ Standard", "↩️ Standard"), "!stigmas standard"}));
+        return null;
     }
 
     /** Die Rangliste aus "!stigmas einstellen", nummeriert (fuer "!stigmas rangliste" und den Stand nach dem Formular). */
@@ -1702,7 +2013,7 @@ public final class DiscordBridge {
             if (a != arenaEinschubRest) continue;
             int runs = a.runs() - gespielt;
             if (runs <= 0) kette.remove(i);
-            else if (gespielt > 0) kette.set(i, new Auftrag(a.modus(), runs, a.weg(), a.freund(), a.warten()));
+            else if (gespielt > 0) kette.set(i, a.mitRuns(runs));
             break;
         }
         arenaEinschubLaufend = arenaEinschubRest = null;
@@ -2588,9 +2899,15 @@ public final class DiscordBridge {
         return (sekunden / 60) + ":" + String.format("%02d", sekunden % 60) + " min";
     }
 
-    /** Ein Zeitpunkt (Millisekunden) als "HH:MM" in Autors Zeitzone. */
+    /**
+     * Ein Zeitpunkt der Rechneruhr (Millisekunden) als "HH:MM" in der Zeitzone des Bots.
+     *
+     * Konrad 20.11. (Geschwister des Zeitzonen-Fehlers): bisher roh nach Berlin umgerechnet -- geht die Windows-Uhr 9 h vor,
+     * stand "Fertig etwa: 15:41" statt 06:41, und Freunde in anderen Zonen sahen Berliner Zeit. Jetzt mit dem Versatz der
+     * Weltuhr und der eingestellten Zone (ohne Einstellung weiter Europe/Berlin).
+     */
     private static String uhrzeitText(long millis) {
-        return java.time.Instant.ofEpochMilli(millis).atZone(BotEngine.ZONE)
+        return de.hustlebot.core.Zeitzone.ausRechnerMs(millis)
                 .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"));
     }
 
@@ -2731,7 +3048,13 @@ public final class DiscordBridge {
 
     /** "!queue" zeigt die Warteschlange, "!queue clear" leert die wartenden, "!queue del 2" nimmt eine raus. */
     private void queue(String rest) {
-        String w = rest == null ? "" : rest.trim().toLowerCase(Locale.ROOT);
+        String roh = rest == null ? "" : rest.trim();
+        String w = roh.toLowerCase(Locale.ROOT);
+        // Autor 15.11.: "!queue start A | B | C" -- die ganze Warteschlange auf einmal (Fenster "Warteschlange").
+        if (w.matches("(start|starten|los|go)(\\s.*)?")) {
+            warteschlangeStarten(roh.replaceFirst("^\\S+\\s*", ""));
+            return;
+        }
         synchronized (kette) {
             if (w.startsWith("clear") || w.startsWith("leer")) {
                 while (kette.size() > 1) kette.remove(kette.size() - 1);
@@ -2745,14 +3068,13 @@ public final class DiscordBridge {
             } else {
                 for (int i = 0; i < kette.size(); i++) {
                     Auftrag a = kette.get(i);
-                    sb.append(i + 1).append(". ").append(i == 0 ? "▶ " : "· ")
-                      .append(modusName(a.modus())).append(" x").append(a.runs());
-                    if ("cathedral".equals(a.modus()) && !"a".equals(a.weg())) sb.append(" (").append(a.weg()).append(")");
-                    sb.append('\n');
+                    sb.append(i + 1).append(". ").append(i == 0 ? "▶ " : "· ").append(eintragText(a)).append('\n');
                 }
             }
-            sb.append(Sprache.t("\n`!queue clear` empties the waiting ones · `!queue del 2` removes number 2",
-                                "\n`!queue clear` leert die wartenden · `!queue del 2` nimmt Nummer 2 heraus"));
+            sb.append(Sprache.t("\n`!queue clear` empties the waiting ones · `!queue del 2` removes number 2"
+                                + " · `!queue start A | B | C` several modes one after another",
+                                "\n`!queue clear` leert die wartenden · `!queue del 2` nimmt Nummer 2 heraus"
+                                + " · `!queue start A | B | C` mehrere Modi nacheinander"));
             client.sendCard(Sprache.t("Queue", "Warteschlange"), sb.toString(), DiscordClient.FARBE_INFO);
         }
     }
@@ -3589,6 +3911,13 @@ public final class DiscordBridge {
 
         Log.warn("Discord", Sprache.t("The main loop has not responded for " + (alter / 1000) + " s.",
                 "Die Hauptschleife antwortet seit " + (alter / 1000) + " s nicht mehr."));
+        // VM 21.11.: der Haenger um 17:38 liess sich hinterher nicht mehr aufklaeren (VM neu gestartet, die Laufzeit hat kein
+        // jstack). Darum gleich ins Protokoll (und damit in den Fehlerbericht unten), wo die Hauptschleife steckt.
+        String stapel = de.hustlebot.core.Fadenabbild.von("bot-worker", 30)
+                + de.hustlebot.core.Fadenabbild.von("dxgi-foto", 15);
+        if (!stapel.isEmpty()) {
+            Log.warn("Discord", Sprache.t("This is where it is stuck:\n", "Hier steckt sie:\n") + stapel);
+        }
         client.sendCard(Sprache.t("Bot is not responding", "Bot antwortet nicht"),
                 Sprache.t("The bot has not moved on for **" + (alter / 1000) + " s**, even though it "
                           + "should be running. Nothing was stopped or restarted. Picture and report below.",
@@ -3623,6 +3952,28 @@ public final class DiscordBridge {
         if (!lief) return;
 
         if (jetzt == BotEngine.State.FERTIG) {
+            // Autor 15.11.: "!ende 06:30" gilt fuer die ganze Warteschlange. Vorher startete nach der Endzeit der naechste
+            // Eintrag, spielte einen Durchlauf (die Zeit war ja schon um) und so weiter -- jeder Eintrag einmal. Jetzt endet
+            // mit der Endzeit alles; die erreichte Endzeit wird geloescht, damit ein spaeterer Start nicht gleich wieder aufhoert.
+            if (endzeitBeendetKette(engine.stopAtMillis(), System.currentTimeMillis(), engine.durchZeitgrenzeBeendet())) {
+                int verworfen;
+                synchronized (kette) {
+                    if (!kette.isEmpty() && "clanwar".equals(kette.remove(0).modus())) kriegLaufEndeUm = System.currentTimeMillis();
+                    verworfen = (int) kette.stream().filter(Auftrag::eigen).count();
+                    kette.clear();
+                }
+                engine.folgenAbholen();   // keine Event-Folge mehr nach der Endzeit
+                String uhr = engine.stopAtClock();
+                engine.setStopAtClock("");
+                if (verworfen > 0) {
+                    client.sendCard(Sprache.t("Stop time reached", "Endzeit erreicht"),
+                            Sprache.t("It is " + uhr + " -- the bot stops. " + verworfen + " waiting entries of the queue were not played.",
+                                      "Es ist " + uhr + " -- der Bot hoert auf. " + verworfen + " wartende Einträge der Warteschlange wurden nicht mehr gespielt."),
+                            DiscordClient.FARBE_INFO);
+                }
+                resetStartKette = false;
+                return;
+            }
             synchronized (kette) {
                 if (!kette.isEmpty()) {
                     Auftrag fertig = kette.remove(0);
@@ -3637,9 +3988,20 @@ public final class DiscordBridge {
                 // Event-Automatik: Hat der fertige Modus etwas angehaengt (nach dem
                 // Kreislauf die Verlies-Runs)? Danach wieder Event -> Kathedrale, bis
                 // zwei Runden hintereinander gar nichts gespielt wurde.
-                var folge = engine.folgeAbholen();
+                var folgen = engine.folgenAbholen();
+                // Die Event-Automatik unten gilt nur fuer den einen Folge-Auftrag wie bisher (Kathedrale -> Verlies).
+                if (folgen.size() > 1) {
+                    int platz = 0;
+                    for (var f : folgen) {
+                        if (f != null) {
+                            kette.add(platz++, new Auftrag(f.modus(), f.runs(), f.wegOderC(), "", false, false, f.plan(), null, null));
+                        }
+                    }
+                }
+                var folge = folgen.size() == 1 ? folgen.get(0) : null;
                 if (folge != null) {
-                    kette.add(0, new Auftrag(folge.modus(), folge.runs(), "c", "", false));
+                    // 18.11.: den Weg des Folge-Auftrags mitnehmen (z. B. "clan" fuers Verlies); ohne Angabe "c" wie bisher.
+                    kette.add(0, new Auftrag(folge.modus(), folge.runs(), folge.wegOderC(), "", false, false, folge.plan(), null, null));
                     if (de.hustlebot.core.Eventautomatik.istAn() && "dungeon".equals(folge.modus())) {
                         var ft = engine.tracker();
                         int gespielt = ft != null ? ft.completedRuns() : 0;
@@ -3673,7 +4035,9 @@ public final class DiscordBridge {
             // die ganze Warteschlange weg und der Bot stand bis zum Morgen still. Bricht ein EINSCHUB (Leuchtturm,
             // Kolosseum, Titanen-Turm, Clan-Laden, Clan-Krieg) mit Fehler ab, geht es mit dem Rest weiter.
             String fehlModus = engine.lastModeId();
-            boolean einschub = jetzt == BotEngine.State.FEHLER && fehlModus != null && !NEBENBEI_BEI.contains(fehlModus);
+            boolean einschub = jetzt == BotEngine.State.FEHLER && fehlModus != null && !NEBENBEI_BEI.contains(fehlModus)
+                    // 18.11.: nach der Endzeit geht es auch nach einem fehlgeschlagenen Einschub nicht weiter.
+                    && !endzeitBeendetKette(engine.stopAtMillis(), System.currentTimeMillis(), false);
             boolean weiter = false;
             synchronized (kette) {
                 if (einschub && kette.size() > 1) {
@@ -3736,7 +4100,7 @@ public final class DiscordBridge {
                 && de.hustlebot.bot.Stoerfenster.rauswurfUm() < engine.modusPauseUm() - 5_000L) {
             synchronized (kette) {
                 // Der angehaltene Auftrag steht vorn und faellt beim FERTIG weg -- der Krieg kommt direkt dahinter.
-                if (!kette.isEmpty() && kette.stream().noneMatch(a -> "clanwar".equals(a.modus()))) {
+                if (!kette.isEmpty() && !kriegEingereiht(kette)) {
                     de.hustlebot.bot.HeldenSet.automatischerKrieg();
                     kette.add(1, new Auftrag("clanwar", 1, "a", "", false));
                 }
@@ -3779,8 +4143,7 @@ public final class DiscordBridge {
         }
 
         synchronized (kette) {
-            boolean kriegSchonDrin = kette.stream()
-                    .anyMatch(a -> "clanwar".equals(a.modus()));
+            boolean kriegSchonDrin = kriegEingereiht(kette);
             if (kriegSchonDrin) return;
 
             de.hustlebot.bot.HeldenSet.automatischerKrieg();   // Ben 17.10.: Helden-Set nur beim automatischen Krieg
@@ -4150,7 +4513,7 @@ public final class DiscordBridge {
         if (engine.wechselAngefordert()) return false;
         if (!teamVorlagenDa()) return false;
         synchronized (kette) {
-            if (kette.stream().anyMatch(a -> "clanwar".equals(a.modus()) || "teamscan".equals(a.modus()))) return false;
+            if (kriegEingereiht(kette) || kette.stream().anyMatch(a -> "teamscan".equals(a.modus()))) return false;
         }
         if (vonHand) teamVonHand = true;
         Log.info("Team", "Nach dem laufenden Run sieht sich der Bot dein Team an (Kaserne, Held, Schirmherren), "
@@ -4362,6 +4725,10 @@ public final class DiscordBridge {
      * ("!titan N") wird beim Start verbraucht, eine Fortsetzung liefe unbegrenzt.
      */
     private static final java.util.Set<String> KRIEG_FORTSETZEN = java.util.Set.of("portal", "titantower", "event");
+    /** Pausiert der Modus fuer den Clan-Krieg und geht danach weiter? (getestet) */
+    static boolean kriegFortsetzen(String modus) {
+        return KRIEG_FORTSETZEN.contains(modus);
+    }
     private final java.util.Set<String> vorlagenGemeldet = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     private boolean vorlagenDa(de.hustlebot.bot.GameMode mode, String id) {
@@ -4420,6 +4787,8 @@ public final class DiscordBridge {
             if (mitTurm) kette.add(new Auftrag("titantower", 1, "c", "", false));
             if (mitFreunden) kette.add(new Auftrag("freundesenden", 1, "c", "", false));
         }
+        // Pruefung 15.11.: eine laengst vergangene Endzeit warf sonst nach dem Turm "Freunden senden" still weg.
+        alteEndzeitLoeschen();
         resetStartKette = true;
         naechstenStarten(true);
         // Code-Pruefung 22.10.: Versuche erst nach dem gelungenen Start verbuchen -- sonst war das Fenster verbraucht.
@@ -4450,7 +4819,7 @@ public final class DiscordBridge {
         if (engine.wechselAngefordert()) return;
         // Clan-Krieg wartet oder laeuft schon (eingereiht)? Dann hier Ruhe -- erst den Krieg zu Ende, "Krieg geht vor".
         synchronized (kette) {
-            if (kette.stream().anyMatch(a -> "clanwar".equals(a.modus()))) return;
+            if (kriegEingereiht(kette)) return;
         }
         java.util.List<String> dazu = new java.util.ArrayList<>();
         java.util.List<Runnable> vermerken = new java.util.ArrayList<>();   // erst nach dem Einschub
@@ -4553,12 +4922,35 @@ public final class DiscordBridge {
                 + ", danach weiter mit " + modusName(modus) + "."));
     }
 
+    /** Setzt, was ein eigener Eintrag mitbringt. False: ein Stigma-Auftrag geht jetzt nicht (schon gemeldet). */
+    private boolean eigenesAnwenden(Auftrag a) {
+        de.hustlebot.core.Eventautomatik.fuerAuftrag(a.kreislauf());
+        de.hustlebot.core.Bezahlung.auftragBeginnt(a.bezahl());
+        portalPlanAnwenden(a);
+        if ("stigmas".equals(a.modus()) && !a.plan().isEmpty()) {
+            return Boolean.TRUE.equals(stigmaAuftrag(a.plan(), Stigmalauf.ANWENDEN));
+        }
+        return true;
+    }
+
     private void naechstenStarten(boolean melden) {
         Auftrag a;
         synchronized (kette) {
             if (kette.isEmpty()) return;
             a = kette.get(0);
         }
+        // Autor 15.11.: Was ein selbst geplanter Eintrag mitbringt (Portal-Plan, Stigma-Auftrag, Bezahlart, Kreislauf), gilt ab
+        // jetzt -- so bekommt auch der 3. Eintrag der Warteschlange seinen eigenen Plan. Geht ein Stigma-Auftrag inzwischen nicht
+        // mehr (z. B. kein Set mehr behalten), faellt nur er weg und der naechste kommt dran.
+        if (a.eigen() && !eigenesAnwenden(a)) {
+            synchronized (kette) {
+                if (!kette.isEmpty() && kette.get(0) == a) kette.remove(0);
+            }
+            naechstenStarten(melden);
+            return;
+        }
+        // Folge-Auftrag mit eigenem Portal-Plan (Autor 21.11.): der Plan kommt mit dem Auftrag (nicht eigen).
+        if (!a.eigen() && "portal".equals(a.modus()) && !a.plan().isEmpty() && !"fortsetzung".equals(a.weg())) portalPlanAnwenden(a);
         // Portal nach dem Clan-Krieg: den Rest des Plans uebernehmen (Autor 24.10.).
         if ("portal".equals(a.modus()) && "fortsetzung".equals(a.weg())) de.hustlebot.bot.PortalMode.fortsetzungErwarten();
         if ("titantower".equals(a.modus()) && "fortsetzung".equals(a.weg())) de.hustlebot.bot.TitanTurmMode.fortsetzungErwarten();
@@ -4570,9 +4962,7 @@ public final class DiscordBridge {
         // Jeder Auftrag bringt seinen Mitspieler mit: mit Freund nur, wenn
         // einer genannt wurde -- sonst liefe "!start dungeon 10" noch mit dem
         // Freund vom letzten Mal.
-        boolean ok = engine.start(a.modus(), a.runs(),
-                a.freund().isEmpty() ? "random" : (a.warten() ? "friendwait" : "friend"),
-                a.freund());
+        boolean ok = engine.start(a.modus(), a.runs(), mitspielerWort(a), a.freund());
         if (!ok && !engine.context().window().locate()) {
             // Hustle Castle ist nicht offen. Das hat der Motor schon ruhig
             // gemeldet (setMeldungOhneSpiel oben) -- keine rote Karte dazu.
@@ -4634,6 +5024,7 @@ public final class DiscordBridge {
             case "cathedral" -> Sprache.t("Cathedral", "Kathedrale");
             case "clanwar"   -> Sprache.t("Clan war", "Clan-Krieg");
             case "event"     -> Sprache.t("Hammer event", "Hammer-Event");
+            case "spielquests" -> Sprache.t("Daily game quests", "Tages-Spielquests");
             case "lighthouse" -> Sprache.t("Lighthouse", "Leuchtturm");
             case "colosseum"  -> Sprache.t("Colosseum", "Kolosseum");
             case "titantower" -> Sprache.t("Titan tower", "Titanen-Turm");
@@ -4686,6 +5077,9 @@ public final class DiscordBridge {
         }
         // Autor 25.10. (Zweitkonten): Burgen anderer Spieler auf den Inseln der Weltkarte angreifen -- "!start burgen".
         if (t.contains("burgen") || t.contains("castles") || t.contains("raid") || t.contains("pvp map")) return "burgen";
+        // Taegliche Spiel-Quests (Autor 18.11.): "!start spielquests" / "daily quests" -- nicht die Event-Quests.
+        if (t.contains("spielquest") || t.contains("spiel-quest") || t.contains("spiel quest")
+                || t.contains("dailyquest") || t.contains("daily quest") || t.contains("daily-quest")) return "spielquests";
         if (t.contains("event") || t.contains("hammer"))         return "event";
         // Hauptbot 09.10. / Freunde-Bot 22.10.: Portal (Level 80 im Autokampf), Gem Bay, Nahrungskisten.
         if (t.contains("portal"))                                return "portal";
@@ -5515,9 +5909,20 @@ public final class DiscordBridge {
      * Wegpunkte mitnehmen, ein "c" (oder "turbo"/"fast"): so schnell wie
      * moeglich. Ohne Angabe: "a", der kuerzeste Weg zum Waechter.
      */
-    private static String weg(String rest) {
+    /**
+     * Das Mitspieler-Wort fuer engine.start: Freund ("friend"/"friendwait"), Clan-Mitglied ("clan", nur Verlies --
+     * Event-Quest 18.11., "!start dungeon 1 clan" oder Folge-Auftrag mit Weg "clan"), sonst "random".
+     */
+    static String mitspielerWort(Auftrag a) {
+        if (!a.freund().isEmpty()) return a.warten() ? "friendwait" : "friend";
+        return "dungeon".equals(a.modus()) && "clan".equals(a.weg()) ? "clan" : "random";
+    }
+
+    static String weg(String rest) {
         if (rest == null) return "a";
         for (String w : rest.toLowerCase(Locale.ROOT).split("\\s+")) {
+            // 18.11.: "dungeon 1 clan" -- mit einem Clan-Mitglied (gilt nur im Verlies, siehe mitspielerWort).
+            if (CLAN_WORT.matcher(w).matches()) return "clan";
             if (w.equals("b")) return "b";
             if (w.equals("c") || w.equals("turbo") || w.equals("fast")) return "c";
         }

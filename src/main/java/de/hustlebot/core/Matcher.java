@@ -28,7 +28,19 @@ public final class Matcher {
     /** Standardschwelle. Darunter gilt ein Treffer als unsicher. */
     public static final double DEFAULT_THRESHOLD = 0.84;
 
+    /**
+     * Name -> Vorlage. Speicher 20.11. (Autor spielt nebenbei Minecraft): steht hier {@code null}, ist die Datei bekannt
+     * (siehe {@link #ungelesen}), aber noch nicht entpackt -- das geschieht erst beim ersten Gebrauch ({@link #holen}).
+     * Vorher entpackte jeder Modus-Start alle ~1430 Bilder (68 MB, ~1 s Rechenzeit), gebraucht wird je Modus nur ein
+     * kleiner Teil (Titanen-Detailbilder 25 MB und Stigma-Fensterbilder 15 MB nennt kein Modus beim Namen).
+     */
     private final Map<String, Mat> templates = new LinkedHashMap<>();
+    /** Vorlagen, deren Datei bekannt, aber noch nicht gelesen ist (in {@link #templates} steht fuer sie null). */
+    private final Map<String, Path> ungelesen = new HashMap<>();
+    /** Breite/Hoehe der noch nicht gelesenen Vorlagen, aus dem PNG-Kopf -- fuer {@link #sizes()} ohne Entpacken. */
+    private final Map<String, int[]> masse = new HashMap<>();
+    /** PNG-Kopf je Datei {Aenderungszeit, Breite, Hoehe}: bleibt ueber loadAll() hinweg, jede Datei wird nur einmal je Programmlauf geoeffnet. */
+    private final Map<Path, long[]> kopfMerker = new HashMap<>();
     private final Path templateRoot;
     private Laufstatistik laufstatistik;
 
@@ -49,10 +61,87 @@ public final class Matcher {
     }
 
     /** Namen aller geladenen Vorlagen samt Groesse, fuer die Pruefliste. */
-    public Map<String, int[]> sizes() {
+    public synchronized Map<String, int[]> sizes() {
         Map<String, int[]> result = new LinkedHashMap<>();
-        templates.forEach((name, mat) -> result.put(name, new int[]{mat.width(), mat.height()}));
+        templates.forEach((name, mat) -> {
+            int[] m = mat != null ? new int[]{mat.width(), mat.height()} : masse.get(name);
+            if (m != null) result.put(name, new int[]{m[0], m[1]});
+        });
         return result;
+    }
+
+    /**
+     * Die Vorlage; beim ersten Gebrauch aus der Datei lesen (Speicher 20.11.). Nur unter der Sperre (this) aufrufen.
+     * Laesst sich die Datei nicht entpacken, ist der Name danach weg -- wie frueher, als sie schon beim Laden ausfiel.
+     */
+    private Mat holen(String name) {
+        Mat t = templates.get(name);
+        if (t != null) return t;
+        Path datei = ungelesen.remove(name);
+        if (datei == null) return null;
+        masse.remove(name);
+        Mat neu = lesen(datei);
+        if (neu.empty()) {
+            neu.release();
+            templates.remove(name);
+            geladenStand.remove(name);
+            geladenPfad.remove(name);
+            Log.warn("Vorlagen", Sprache.t("File could not be read: ", "Datei konnte nicht gelesen werden: ") + datei.getFileName());
+            return null;
+        }
+        templates.put(name, neu);
+        Log.debug("Vorlagen", "Geladen: " + name + " (" + neu.width() + "x" + neu.height() + ")");
+        return neu;
+    }
+
+    /** Wie viele Vorlagen gerade entpackt im Speicher liegen (fuer Tests und den Speicherblick). */
+    synchronized int entpackt() {
+        int n = 0;
+        for (Mat m : templates.values()) if (m != null) n++;
+        return n;
+    }
+
+    /** Bild als BGR lesen; leer, wenn es nicht geht. */
+    private static Mat lesen(Path file) {
+        boolean nurAscii = file.toString().chars().allMatch(c -> c < 128);
+        Mat template = nurAscii ? Imgcodecs.imread(file.toString(), Imgcodecs.IMREAD_COLOR) : new Mat();
+        if (template.empty()) {
+            // OpenCV oeffnet unter Windows keine Pfade mit Umlauten/kyrillischen Buchstaben (Hauptbot 02.10.:
+            // Arena-Namensbild "ar_sicher_Турист_..." blieb wirkungslos). Dann die Bytes selbst lesen.
+            template.release();
+            try {
+                MatOfByte roh = new MatOfByte(Files.readAllBytes(file));
+                template = Imgcodecs.imdecode(roh, Imgcodecs.IMREAD_COLOR);
+                roh.release();
+            } catch (IOException e) {
+                template = new Mat();
+            }
+        }
+        return template;
+    }
+
+    /** Breite und Hoehe aus dem PNG-Kopf (IHDR), ohne das Bild zu entpacken; null = keine lesbare PNG-Datei. */
+    static int[] pngMasse(Path datei) {
+        try (java.io.InputStream in = Files.newInputStream(datei)) {
+            byte[] k = in.readNBytes(24);
+            if (k.length < 24 || (k[0] & 0xFF) != 0x89 || k[1] != 'P' || k[2] != 'N' || k[3] != 'G'
+                    || k[12] != 'I' || k[13] != 'H' || k[14] != 'D' || k[15] != 'R') return null;
+            java.nio.ByteBuffer b = java.nio.ByteBuffer.wrap(k);
+            int w = b.getInt(16), h = b.getInt(20);
+            return w > 0 && h > 0 ? new int[]{w, h} : null;
+        } catch (IOException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** PNG-Masse mit Merker: dieselbe Datei mit derselben Aenderungszeit wird nicht noch einmal geoeffnet. */
+    private int[] kopfMasse(Path datei, long stand) {
+        long[] k = kopfMerker.get(datei);
+        if (k != null && k[0] == stand) return new int[]{(int) k[1], (int) k[2]};
+        int[] m = pngMasse(datei);
+        if (m == null) kopfMerker.remove(datei);
+        else kopfMerker.put(datei, new long[]{stand, m[0], m[1]});
+        return m;
     }
 
     /** Der Ordner "templates" (11.10.: fuer die Doppelt-Pruefung der Arena-Namensbilder). */
@@ -70,7 +159,7 @@ public final class Matcher {
 
     /** Die Vorlage; fehlt sie gerade, weil loadAll() laeuft, bis zu 3 s auf das Ende warten. */
     private Mat vorlage(String name) {
-        Mat t = templates.get(name);
+        Mat t = holen(name);
         if (t != null || !laedt) return t;
         long bis = System.currentTimeMillis() + 3000;
         synchronized (ladeSperre) {
@@ -83,7 +172,7 @@ public final class Matcher {
                 }
             }
         }
-        return templates.get(name);
+        return holen(name);
     }
 
     /** Liest alle PNG-Dateien rekursiv ein. Der Dateiname ohne Endung ist der Vorlagenname. */
@@ -100,10 +189,14 @@ public final class Matcher {
     }
 
     private int ladenIntern() {
-        templates.values().forEach(Mat::release);
+        templates.values().forEach(m -> {
+            if (m != null) m.release();
+        });
         grauVorlagen.values().forEach(Mat::release);
         grauVorlagen.clear();
         templates.clear();
+        ungelesen.clear();
+        masse.clear();
         geladenStand.clear();
         geladenPfad.clear();
         doppeltStehend.clear();
@@ -121,12 +214,9 @@ public final class Matcher {
             return 0;
         }
 
-        try (Stream<Path> files = Files.walk(templateRoot)) {
-            files.filter(p -> p.toString().toLowerCase().endsWith(".png"))
-                 .filter(ServerSparsam::bildLaden)
-                 .sorted()
-                 .forEach(this::loadOne);
-        } catch (IOException e) {
+        try {
+            ordnerLaden(templateRoot, true);
+        } catch (IOException | java.io.UncheckedIOException e) {
             Log.error("Vorlagen", Sprache.t("Folder could not be read", "Ordner konnte nicht gelesen werden"), e);
         }
 
@@ -134,12 +224,9 @@ public final class Matcher {
         // Screenshot ausgeschnitten hat. Eigener Ordner, templates\ bleibt
         // Autors Capture-Images.exe vorbehalten.
         if (Files.isDirectory(GELERNT)) {
-            try (Stream<Path> files = Files.walk(GELERNT)) {
-                files.filter(p -> p.toString().toLowerCase().endsWith(".png"))
-                     .filter(ServerSparsam::bildLaden)
-                     .sorted()
-                     .forEach(this::loadOne);
-            } catch (IOException e) {
+            try {
+                ordnerLaden(GELERNT, true);
+            } catch (IOException | java.io.UncheckedIOException e) {
                 Log.warn("Vorlagen", Sprache.t("Folder gelernt\\ could not be read: ",
                         "Ordner gelernt\\ konnte nicht gelesen werden: ") + e.getMessage());
             }
@@ -148,11 +235,9 @@ public final class Matcher {
         // Autor 24.10.: eigene Aufnahmen des Spielers (sichtbarer Ordner "My pictures") -- bei gleichem Namen gilt die neuere.
         Path eigene = EIGENE_BILDER;
         if (eigene != null && Files.isDirectory(eigene)) {
-            try (Stream<Path> files = Files.walk(eigene)) {
-                files.filter(p -> p.toString().toLowerCase().endsWith(".png"))
-                     .sorted()
-                     .forEach(this::loadOne);
-            } catch (IOException e) {
+            try {
+                ordnerLaden(eigene, false);
+            } catch (IOException | java.io.UncheckedIOException e) {
                 Log.warn("Vorlagen", Sprache.t("Folder \"My pictures\" could not be read: ",
                         "Ordner \"My pictures\" konnte nicht gelesen werden: ") + e.getMessage());
             }
@@ -180,27 +265,51 @@ public final class Matcher {
         }
     }
 
+    /**
+     * Alle PNG-Dateien unter {@code wurzel} laden, sortiert wie bisher. Speicher/Tempo 20.11.: das Aenderungsdatum kommt
+     * gleich aus dem Ordnerlesen (Files.find) -- vorher fragte loadOne je Datei einzeln (1400 Zugriffe, ~140 ms je Modus-Start).
+     */
+    private void ordnerLaden(Path wurzel, boolean sparsamFiltern) throws IOException {
+        Map<Path, Long> staende = new HashMap<>();
+        try (Stream<Path> files = Files.find(wurzel, Integer.MAX_VALUE, (p, a) -> {
+            if (!a.isDirectory() && p.toString().toLowerCase().endsWith(".png")) staende.put(p, a.lastModifiedTime().toMillis());
+            return false;
+        })) {
+            files.forEach(p -> { });
+        }
+        staende.keySet().stream()
+               .filter(p -> !sparsamFiltern || ServerSparsam.bildLaden(p))
+               .sorted()
+               .forEach(p -> loadOne(p, staende.get(p)));
+    }
+
     private void loadOne(Path file) {
+        long stand = 0;
+        try {
+            stand = Files.getLastModifiedTime(file).toMillis();
+        } catch (IOException e) {
+            // ohne Datum gilt die Datei als alt
+        }
+        loadOne(file, stand);
+    }
+
+    private void loadOne(Path file, long stand) {
         String name = file.getFileName().toString();
         name = name.substring(0, name.length() - 4);
 
-        boolean nurAscii = file.toString().chars().allMatch(c -> c < 128);
-        Mat template = nurAscii ? Imgcodecs.imread(file.toString(), Imgcodecs.IMREAD_COLOR) : new Mat();
-        if (template.empty()) {
-            // OpenCV oeffnet unter Windows keine Pfade mit Umlauten/kyrillischen Buchstaben (Hauptbot 02.10.:
-            // Arena-Namensbild "ar_sicher_Турист_..." blieb wirkungslos). Dann die Bytes selbst lesen.
-            template.release();
-            try {
-                org.opencv.core.MatOfByte roh = new org.opencv.core.MatOfByte(Files.readAllBytes(file));
-                template = Imgcodecs.imdecode(roh, Imgcodecs.IMREAD_COLOR);
-                roh.release();
-            } catch (IOException e) {
-                template = new Mat();
+        boolean neuIstEigen = istEigen(file);
+        boolean eigenSpiel = neuIstEigen || eigenAusDatei.contains(name);
+        // Speicher 20.11.: eine lesbare PNG-Datei wird erst beim ersten Gebrauch entpackt (holen). Sofort gelesen wird nur,
+        // was keinen PNG-Kopf hat (dann gilt wie bisher: unlesbar -> Warnung, Name fehlt) und das Paar eigene Aufnahme/Original.
+        int[] kopf = eigenSpiel ? null : kopfMasse(file, stand);
+        Mat template = null;
+        if (kopf == null) {
+            template = lesen(file);
+            if (template.empty()) {
+                template.release();
+                Log.warn("Vorlagen", Sprache.t("File could not be read: ", "Datei konnte nicht gelesen werden: ") + file.getFileName());
+                return;
             }
-        }
-        if (template.empty()) {
-            Log.warn("Vorlagen", Sprache.t("File could not be read: ", "Datei konnte nicht gelesen werden: ") + file.getFileName());
-            return;
         }
         // DOPPELTER NAME: DIE NEUERE AUFNAHME GILT (27.09.).
         //
@@ -209,17 +318,11 @@ public final class Matcher {
         // dem Alphabet, "dungeon" kommt nach "cathedral" -- bisher gewann also
         // immer die ALTE Datei, und eine neue Aufnahme blieb ohne Wirkung
         // (so bei dc_guardian, und am 27.09. fast bei dc_claim_reward).
-        long stand = 0;
-        try {
-            stand = Files.getLastModifiedTime(file).toMillis();
-        } catch (IOException e) {
-            // ohne Datum gilt die Datei als alt
-        }
+        //
         // EIGENE AUFNAHMEN (17.10.): eine Datei aus templates\gelernt\eigen ist die aktive Vorlage, Autors Original
         // bleibt als Rueckfall im Speicher (eigeneZuruecknehmen) -- egal, welche der beiden zuerst geladen wird.
-        boolean neuIstEigen = istEigen(file);
-        if (neuIstEigen || eigenAusDatei.contains(name)) {
-            Mat alt = templates.get(name);
+        if (eigenSpiel) {
+            Mat alt = holen(name);   // ein noch nicht gelesenes Original jetzt lesen, sonst fehlt der Rueckfall
             if (neuIstEigen) {
                 if (alt != null && !eigenAusDatei.contains(name)) originale.put(name, alt);
                 else if (alt != null) alt.release();
@@ -244,6 +347,8 @@ public final class Matcher {
             if (!vomSpieler) {
                 doppeltStehend.add(name);
                 Log.debug("Vorlagen", "Name doppelt (eigene Ordner): " + name + " -- es gilt die neuere Aufnahme.");
+            } else if (!doppeltGewarnt.add(name)) {
+                Log.debug("Vorlagen", "Name doppelt (Bild des Spielers, schon gemeldet): " + name + " -- es gilt die neuere Aufnahme.");
             } else Log.warn("Vorlagen", Sprache.t(
                     "Name used twice: " + name + ". Keeping the "
                     + (neuer ? "newer capture " + file.getParent().getFileName() + "\\" + file.getFileName()
@@ -252,7 +357,7 @@ public final class Matcher {
                     + (neuer ? "neuere Aufnahme " + file.getParent().getFileName() + "\\" + file.getFileName()
                              : "schon geladene, neuere Aufnahme") + "."));
             if (!neuer) {
-                template.release();
+                if (template != null) template.release();
                 return;
             }
             Mat alt = templates.get(name);
@@ -261,7 +366,14 @@ public final class Matcher {
         geladenStand.put(name, stand);
         geladenPfad.put(name, file);
         templates.put(name, template);
-        Log.debug("Vorlagen", "Geladen: " + name + " (" + template.width() + "x" + template.height() + ")");
+        if (template == null) {
+            ungelesen.put(name, file);
+            masse.put(name, kopf);
+        } else {
+            ungelesen.remove(name);
+            masse.remove(name);
+            Log.debug("Vorlagen", "Geladen: " + name + " (" + template.width() + "x" + template.height() + ")");
+        }
     }
 
     // ------------------------------------------------------------------
@@ -324,7 +436,7 @@ public final class Matcher {
         Mat ausschnitt = null;
         try {
             synchronized (this) {
-                Mat original = templates.get(name);
+                Mat original = holen(name);
                 if (original == null || h.width() != original.width() || h.height() != original.height()
                         || h.x() < 0 || h.y() < 0 || h.x() + h.width() > screen.width() || h.y() + h.height() > screen.height()
                         || screen.type() != original.type()) {
@@ -463,6 +575,12 @@ public final class Matcher {
     private final Map<String, Path> geladenPfad = new HashMap<>();
     /** Doppelte Namen aus Autors eigenen Ordnern (templates\, gelernt\) -- seit Jahren so, keine Warnung wert. */
     private final java.util.TreeSet<String> doppeltStehend = new java.util.TreeSet<>();
+    /**
+     * Doppelnamen mit einem Bild des Spielers, fuer die schon gewarnt wurde. Konrad 20.11. (BUX9): die Vorlagen werden bei
+     * jedem Modus-Start neu geladen -- "Name doppelt vergeben: confirm" stand 31 Mal in einer Nacht im Protokoll und
+     * ueberdeckte echte Warnungen. Einmal je Programmstart reicht, danach nur noch im Feinprotokoll.
+     */
+    private final java.util.Set<String> doppeltGewarnt = new java.util.HashSet<>();
 
     public synchronized boolean has(String name) {
         return templates.containsKey(name);
@@ -803,6 +921,9 @@ public final class Matcher {
         b.append(vergleicheGesamt).append(Sprache.t(" comparisons, ", " Vergleiche, davon ")).append(vergleicheImKasten)
          .append(Sprache.t(" of them in the small box (", " im kleinen Kasten (")).append(anteil).append("%), ").append(vergleicheGrau)
          .append(Sprache.t(" in greyscale", " in Graustufen"));
+        if (vergleicheImBereich > 0) {
+            b.append(", ").append(vergleicheImBereich).append(Sprache.t(" in the fixed search area", " im festen Suchbereich"));
+        }
 
         long gesamtMs = zeitJeVorlage.values().stream().mapToLong(v -> v[1]).sum() / 1_000_000;
         if (gesamtMs > 0) {
@@ -821,6 +942,7 @@ public final class Matcher {
         vergleicheGesamt = 0;
         vergleicheImKasten = 0;
         vergleicheGrau = 0;
+        vergleicheImBereich = 0;
         zeitJeVorlage.clear();
     }
 
@@ -1050,7 +1172,7 @@ public final class Matcher {
      */
     public synchronized List<int[]> kaesten(String name, int fensterBreite, int fensterHoehe, int luft) {
         List<int[]> aus = new ArrayList<>();
-        Mat template = templates.get(name);
+        Mat template = holen(name);
         List<int[]> liste = stellen.get(name);
         if (template == null || liste == null) return aus;
         for (int[] s : new ArrayList<>(liste)) {
@@ -1071,7 +1193,7 @@ public final class Matcher {
      * gleiche Werte, gleiche Schwellen. Der Treffer steht in Fensterkoordinaten.
      */
     public synchronized Optional<Hit> imAusschnitt(Mat ausschnitt, int ax, int ay, String name) {
-        Mat template = templates.get(name);
+        Mat template = holen(name);
         if (template == null || ausschnitt == null || ausschnitt.empty()
                 || template.width() > ausschnitt.width()
                 || template.height() > ausschnitt.height()) {
@@ -1205,6 +1327,12 @@ public final class Matcher {
             if (n > 10 && n % 6 != 1) return Optional.empty();
         }
 
+        // Sparsam 20.11.: statt im ganzen Bild nur im festen Suchbereich der Vorlage (Suchbereiche, belegt an 1544
+        // Freunde-Berichten). Gleiche Rechnung auf einem Ausschnitt. Jede 25. Suche und jedes gruendliche Bild gehen
+        // weiter ueber das ganze Bild; liegt der Fund dort ausserhalb, gilt der Bereich fuer diese Vorlage nicht mehr.
+        Rect bereich = bereichFuer(name, screen, template);
+        if (bereich != null) return imBereichSuchen(screen, name, template, bereich);
+
         // Ganzes Bild: beim ersten Mal, nach einem Fensterwechsel, und bei
         // der gelegentlichen Nachpruefung.
         Mat result = new Mat();
@@ -1228,11 +1356,88 @@ public final class Matcher {
             if (treffer.score() >= DEFAULT_THRESHOLD) {
                 stelleMerken(name, treffer, screen);
                 bestaetigt.add(name);
+                bereichPruefen(name, treffer, screen, template);
             }
             return Optional.of(treffer);
         } finally {
             result.release();
         }
+    }
+
+    // ------------------------------------------------------------------
+    //  Feste Suchbereiche (Sparsam 20.11.)
+    // ------------------------------------------------------------------
+
+    /** Schalter: false = immer das ganze Bild wie vor dem 20.11. */
+    static volatile boolean BEREICHE_AN = true;
+    /** Vorlagen, die ausserhalb ihres Bereichs gefunden wurden -- fuer sie gilt bis zum Neustart wieder das ganze Bild. */
+    private final Set<String> bereichAus = new HashSet<>();
+    /** Suchen je Vorlage mit festem Bereich (fuer "jede 25. ganz"). */
+    private final Map<String, Integer> bereichAbfragen = new HashMap<>();
+    private long vergleicheImBereich;
+
+    /** feste-suchbereiche.txt "aus" = wie vor dem 20.11. immer das ganze Bild (ohne Datei: an). Hoechstens je Minute gelesen. */
+    private static final Schalterdatei BEREICHE_SCHALTER = new Schalterdatei(Ordner.bei("feste-suchbereiche.txt"), "Suchbereiche", true);
+    private static volatile boolean bereicheSchalterAn = true;
+    private static volatile long bereicheSchalterGelesen;
+
+    private static boolean bereicheErlaubt() {
+        long jetzt = System.currentTimeMillis();
+        if (jetzt - bereicheSchalterGelesen > 60_000) {
+            bereicheSchalterGelesen = jetzt;
+            bereicheSchalterAn = BEREICHE_SCHALTER.lesen();
+        }
+        return BEREICHE_AN && bereicheSchalterAn;
+    }
+
+    /** Der feste Suchbereich fuer diese Suche, oder null = ganzes Bild. */
+    private Rect bereichFuer(String name, Mat screen, Mat template) {
+        if (gruendlich || bereichAus.contains(name) || !Suchbereiche.hat(name) || !bereicheErlaubt()) return null;
+        int n = bereichAbfragen.merge(name, 1, Integer::sum);
+        if (n % VOLLPRUEFUNG_JEDER == 0) return null;   // Nachpruefung im ganzen Bild
+        return Suchbereiche.bereich(name, screen.width(), screen.height(), template.width(), template.height());
+    }
+
+    /** Dieselbe Suche wie im ganzen Bild (gleiche Farbe/Graustufen, gleiche Werte), nur im Bereich. */
+    private Optional<Hit> imBereichSuchen(Mat screen, String name, Mat template, Rect bereich) {
+        Mat grauV = grauVorlage(name, template);
+        Mat quelle = grauV != null ? grauSchirm(screen) : screen;
+        Mat ausschnitt = new Mat(quelle, bereich);
+        Mat result = new Mat();
+        try {
+            long t0 = System.nanoTime();
+            Imgproc.matchTemplate(ausschnitt, grauV != null ? grauV : template, result, Imgproc.TM_CCOEFF_NORMED);
+            zeitMerken(name, t0);
+            if (grauV != null) vergleicheGrau++;
+            vergleicheGesamt++;
+            vergleicheImBereich++;
+            Core.MinMaxLocResult mm = Core.minMaxLoc(result);
+            Hit treffer = new Hit(name, bereich.x + (int) mm.maxLoc.x, bereich.y + (int) mm.maxLoc.y,
+                    template.width(), template.height(), mm.maxVal);
+            if (treffer.score() >= DEFAULT_THRESHOLD) {
+                stelleMerken(name, treffer, screen);
+                bestaetigt.add(name);
+            }
+            return Optional.of(treffer);
+        } finally {
+            result.release();
+            ausschnitt.release();
+        }
+    }
+
+    /** Sicherer Fund im ganzen Bild AUSSERHALB des festen Bereichs: Bereich fuer diese Vorlage abschalten. */
+    private void bereichPruefen(String name, Hit treffer, Mat screen, Mat template) {
+        if (bereichAus.contains(name) || !Suchbereiche.hat(name)) return;
+        Rect b = Suchbereiche.bereich(name, screen.width(), screen.height(), template.width(), template.height());
+        if (b == null) return;
+        boolean drin = treffer.x() >= b.x && treffer.y() >= b.y
+                && treffer.x() + treffer.width() <= b.x + b.width && treffer.y() + treffer.height() <= b.y + b.height;
+        if (drin) return;
+        bereichAus.add(name);
+        Log.info("Vorlagen", Sprache.t(name + " found outside its search area (at " + treffer.x() + "," + treffer.y()
+                        + ") -- searching the whole picture for it again from now on.",
+                name + " ausserhalb ihres Suchbereichs gefunden (bei " + treffer.x() + "," + treffer.y()
+                        + ") -- fuer diese Vorlage ab jetzt wieder das ganze Bild."));
     }
 
     /** Sucht die beste Fundstelle einer Vorlage. Leer, wenn nichts sicher genug passt. */
@@ -1258,7 +1463,7 @@ public final class Matcher {
      * Zwischenspeicher je Bild noch die gemerkten Stellen.
      */
     public synchronized Optional<Hit> findImBereich(Mat screen, String name, Rect bereich, double threshold) {
-        Mat template = templates.get(name);
+        Mat template = holen(name);
         if (template == null) return Optional.empty();
         int x = Math.max(0, bereich.x);
         int y = Math.max(0, bereich.y);
@@ -1305,7 +1510,7 @@ public final class Matcher {
     public synchronized List<Hit> findAllSchnell(Mat screen, String name, Rect bereich, double vorSchwelle,
                                                  double schwelle, int maxHits) {
         List<Hit> treffer = new ArrayList<>();
-        Mat template = templates.get(name);
+        Mat template = holen(name);
         if (template == null) return treffer;
         int x = Math.max(0, bereich.x) & ~1;
         int y = Math.max(0, bereich.y) & ~1;
@@ -1373,7 +1578,7 @@ public final class Matcher {
      * von denen mehrere gleichzeitig auf der Karte liegen.
      */
     public synchronized List<Hit> findAll(Mat screen, String name, double threshold, int maxHits) {
-        Mat template = templates.get(name);
+        Mat template = holen(name);
         if (template == null) return List.of();
 
         // Je Bild nur einmal rechnen (24.09.). Ein Schritt auf der Etagenkarte
@@ -1394,6 +1599,166 @@ public final class Matcher {
         List<Hit> ergebnis = findAllRechnen(screen, name, template, threshold, maxHits);
         if (merken) alleImBild.put(schluessel, ergebnis);
         return new ArrayList<>(ergebnis);
+    }
+
+    /**
+     * Wie findAll, aber nur im Bereich (Sparsam 20.11.): dieselbe Rechnung auf einem Ausschnitt -- jede Stelle im
+     * Bereich bekommt denselben Wert wie im ganzen Bild. Fuer Aufrufer, die Funde ausserhalb ohnehin verwerfen
+     * (Verlies: tote Einheiten nur unterhalb der Truppenzeile). Treffer in Bildkoordinaten.
+     */
+    public synchronized List<Hit> findAllImBereich(Mat screen, String name, double threshold, int maxHits, Rect bereich) {
+        Mat template = holen(name);
+        if (template == null) return List.of();
+        int x = Math.max(0, bereich.x), y = Math.max(0, bereich.y);
+        int w = Math.min(screen.width(), bereich.x + bereich.width) - x;
+        int h = Math.min(screen.height(), bereich.y + bereich.height) - y;
+        if (w < template.width() || h < template.height()) return List.of();
+        if (x == 0 && y == 0 && w == screen.width() && h == screen.height()) return findAll(screen, name, threshold, maxHits);
+        boolean merken = ALLE_MERKEN && Thread.currentThread() == bildFaden;
+        String schluessel = name + "|" + threshold + "|" + maxHits + "|" + x + "," + y + "," + w + "," + h;
+        if (merken) {
+            if (screen != alleFuerSchirm) {
+                alleImBild.clear();
+                alleFuerSchirm = screen;
+            }
+            List<Hit> bekannt = alleImBild.get(schluessel);
+            if (bekannt != null) return new ArrayList<>(bekannt);
+        }
+        Mat grauV = grauVorlage(name, template);
+        Mat quelle = grauV != null ? grauSchirm(screen) : screen;
+        Mat ausschnitt = new Mat(quelle, new Rect(x, y, w, h));
+        List<Hit> ergebnis = new ArrayList<>();
+        try {
+            for (Hit t : searchAll(ausschnitt, grauV != null ? grauV : template, name, threshold, maxHits)) {
+                ergebnis.add(new Hit(t.name(), t.x() + x, t.y() + y, t.width(), t.height(), t.score()));
+            }
+            if (grauV != null) vergleicheGrau++;
+            vergleicheImBereich++;
+        } finally {
+            ausschnitt.release();
+        }
+        ergebnis.forEach(this::report);
+        if (merken) alleImBild.put(schluessel, ergebnis);
+        return new ArrayList<>(ergebnis);
+    }
+
+    // ------------------------------------------------------------------
+    //  Suche in Kaesten um bekannte Stellen (Kathedrale, 21.11.)
+    // ------------------------------------------------------------------
+    //
+    // Autor 21.11.: "Der Bot erkennt am Anfang, welches Muster die Etage hat, und sucht dann nur noch an den Positionen
+    // der Wegpunkte." Die Kaesten beschreiben, wo die MITTE eines Treffers liegen darf; gesucht wird darin mit der
+    // Vorlage drumherum. Gerechnet wird je Stelle genau dasselbe wie im ganzen Bild (gleiche Farbe/Graustufen, gleiche
+    // Werte, gleiche Schwellen) -- nur an weniger Stellen.
+
+    /**
+     * Der Suchkasten fuer eine Vorlage, deren MITTE in {@code mitte} liegen darf: die Mitte plus die Vorlage drumherum
+     * (und 1 Punkt Luft), auf das Bild beschnitten. Null, wenn die Vorlage nicht hineinpasst.
+     */
+    public static Rect suchKasten(Rect mitte, int vorlageB, int vorlageH, int bildB, int bildH) {
+        int x0 = Math.max(0, mitte.x - vorlageB / 2 - 1);
+        int y0 = Math.max(0, mitte.y - vorlageH / 2 - 1);
+        int x1 = Math.min(bildB, mitte.x + mitte.width + (vorlageB - vorlageB / 2) + 1);
+        int y1 = Math.min(bildH, mitte.y + mitte.height + (vorlageH - vorlageH / 2) + 1);
+        if (x1 - x0 < vorlageB || y1 - y0 < vorlageH) return null;
+        return new Rect(x0, y0, x1 - x0, y1 - y0);
+    }
+
+    /**
+     * Wie findAll, aber nur dort, wo die MITTE eines Treffers in einem der Kaesten liegen darf. Je Kasten dieselbe
+     * Rechnung wie im ganzen Bild; danach wie dort: der beste zuerst, was naeher als die halbe Vorlage an einem
+     * besseren liegt, faellt weg, hoechstens maxHits. Je Bild nur einmal gerechnet (wie findAll).
+     */
+    public synchronized List<Hit> findAllInKaesten(Mat screen, String name, double threshold, int maxHits, List<Rect> mitten) {
+        Mat template = holen(name);
+        if (template == null || mitten == null) return List.of();
+        boolean merken = ALLE_MERKEN && Thread.currentThread() == bildFaden;
+        StringBuilder sb = new StringBuilder(name).append('|').append(threshold).append('|').append(maxHits).append("|K");
+        for (Rect m : mitten) sb.append(m.x).append(',').append(m.y).append(',').append(m.width).append(',').append(m.height).append(';');
+        String schluessel = sb.toString();
+        if (merken) {
+            if (screen != alleFuerSchirm) {
+                alleImBild.clear();
+                alleFuerSchirm = screen;
+            }
+            List<Hit> bekannt = alleImBild.get(schluessel);
+            if (bekannt != null) return new ArrayList<>(bekannt);
+        }
+        Mat grauV = grauVorlage(name, template);
+        Mat quelle = grauV != null ? grauSchirm(screen) : screen;
+        List<Hit> alle = new ArrayList<>();
+        for (Rect m : mitten) {
+            Rect k = suchKasten(m, template.width(), template.height(), screen.width(), screen.height());
+            if (k == null) continue;
+            Mat ausschnitt = new Mat(quelle, k);
+            try {
+                for (Hit t : searchAll(ausschnitt, grauV != null ? grauV : template, name, threshold, maxHits)) {
+                    alle.add(new Hit(t.name(), t.x() + k.x, t.y() + k.y, t.width(), t.height(), t.score()));
+                }
+            } finally {
+                ausschnitt.release();
+            }
+            if (grauV != null) vergleicheGrau++;
+            vergleicheImBereich++;
+        }
+        List<Hit> ergebnis = zusammenlegen(alle, template.width(), template.height(), maxHits);
+        ergebnis.forEach(this::report);
+        if (merken) alleImBild.put(schluessel, ergebnis);
+        return new ArrayList<>(ergebnis);
+    }
+
+    /**
+     * Wie find, aber nur dort, wo die MITTE des Treffers in einem der Kaesten liegen darf: der beste Wert aller Kaesten
+     * (dieselbe Rechnung wie im ganzen Bild). Leer, wenn er unter der Schwelle liegt.
+     */
+    public synchronized Optional<Hit> findInKaesten(Mat screen, String name, List<Rect> mitten, double threshold) {
+        List<Hit> h = findAllInKaesten(screen, name, threshold, 1, mitten);
+        if (h.isEmpty()) return Optional.empty();
+        eigenVielleicht(screen, h.get(0));
+        return Optional.of(h.get(0));
+    }
+
+    /**
+     * Wie findAllSchnell, aber je Kasten (die MITTE eines Treffers liegt im Kasten), beschnitten auf {@code grenze}
+     * (null = ganzes Bild). Dieselbe Vorsuche in halber Groesse und dieselbe Nachpruefung in voller Groesse -- nur
+     * kleinere Flaechen. Zusammengelegt wie bei findAllInKaesten.
+     */
+    public synchronized List<Hit> findAllSchnellInKaesten(Mat screen, String name, List<Rect> mitten, Rect grenze,
+                                                          double vorSchwelle, double schwelle, int maxHits) {
+        Mat template = holen(name);
+        if (template == null || mitten == null) return List.of();
+        List<Hit> alle = new ArrayList<>();
+        for (Rect m : mitten) {
+            Rect k = suchKasten(m, template.width(), template.height(), screen.width(), screen.height());
+            if (k == null) continue;
+            if (grenze != null) {
+                int x0 = Math.max(k.x, grenze.x), y0 = Math.max(k.y, grenze.y);
+                int x1 = Math.min(k.x + k.width, grenze.x + grenze.width), y1 = Math.min(k.y + k.height, grenze.y + grenze.height);
+                if (x1 - x0 < template.width() || y1 - y0 < template.height()) continue;
+                k = new Rect(x0, y0, x1 - x0, y1 - y0);
+            }
+            alle.addAll(findAllSchnell(screen, name, k, vorSchwelle, schwelle, maxHits));
+        }
+        return zusammenlegen(alle, template.width(), template.height(), maxHits);
+    }
+
+    /** Treffer aus mehreren Kaesten wie bei der Suche im ganzen Bild: bester zuerst, Nachbarn eines besseren fallen weg. */
+    static List<Hit> zusammenlegen(List<Hit> alle, int breite, int hoehe, int maxHits) {
+        List<Hit> sortiert = new ArrayList<>(alle);
+        sortiert.sort((p, q) -> Double.compare(q.score(), p.score()));
+        List<Hit> aus = new ArrayList<>();
+        for (Hit t : sortiert) {
+            if (aus.size() >= maxHits) break;
+            boolean nah = false;
+            for (Hit a : aus) {
+                if (Math.abs(a.x() - t.x()) <= breite / 2 && Math.abs(a.y() - t.y()) <= hoehe / 2) {
+                    nah = true;
+                    break;
+                }
+            }
+            if (!nah) aus.add(t);
+        }
+        return aus;
     }
 
     /** Schalter fuer den findAll-Zwischenspeicher (Messblock 3 am 24.09.). */
@@ -1445,7 +1810,7 @@ public final class Matcher {
      * --, waere Grau genau die falsche Wahl.
      */
     public synchronized List<Hit> findAllGrau(Mat screen, String name, double threshold, int maxHits) {
-        Mat template = templates.get(name);
+        Mat template = holen(name);
         if (template == null) return List.of();
 
         Mat grauSchirm = new Mat();
@@ -1579,7 +1944,7 @@ public final class Matcher {
 
     public synchronized List<Hit> findCore(Mat screen, String name, double keepX, double keepY,
                               double[] scales, double threshold, int maxHits) {
-        Mat template = templates.get(name);
+        Mat template = holen(name);
         if (template == null) return List.of();
 
         int coreW = Math.max(8, (int) (template.width() * keepX));
@@ -1754,7 +2119,7 @@ public final class Matcher {
      * die gar nicht da sind.
      */
     public synchronized Optional<Hit> weisseSchrift(WeissBild bild, String name, double[] scales) {
-        Mat template = templates.get(name);
+        Mat template = holen(name);
         if (bild == null || template == null) return Optional.empty();
 
         Mat maskeVorlage = weissMaske(template);

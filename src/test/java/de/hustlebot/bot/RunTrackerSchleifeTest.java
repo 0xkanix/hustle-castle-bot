@@ -48,4 +48,21 @@ class RunTrackerSchleifeTest {
                 "gesunde Leuchtturm-Kaempfe: drei verschiedene Klicks im Wechsel");
         de.hustlebot.core.Log.clear();
     }
+
+    /** Konrad 20.11. (LT6E, BUX9): Zeit, die der Motor selbst braucht (Turnier-Balken lesen), zaehlt nicht als Stillstand. */
+    @Test
+    void motorzeitWirdGutgeschriebenAberNieUeberJetztHinaus() throws Exception {
+        RunTracker t = new RunTracker(1);
+        long start = t.letzterFortschrittUm();
+        Thread.sleep(30);
+        t.gutschreiben(20);
+        assertEquals(start + 20, t.letzterFortschrittUm(), "die 20 ms des Motors zaehlen nicht");
+        t.gutschreiben(60_000);
+        assertTrue(t.letzterFortschrittUm() <= System.currentTimeMillis(), "nie in die Zukunft");
+        assertEquals(0, t.idleSeconds());
+        long vorher = t.letzterFortschrittUm();
+        t.gutschreiben(0);
+        t.gutschreiben(-5);
+        assertEquals(vorher, t.letzterFortschrittUm(), "nichts oder negativ: keine Aenderung");
+    }
 }

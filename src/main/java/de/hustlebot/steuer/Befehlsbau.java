@@ -39,7 +39,9 @@ public final class Befehlsbau {
         // Autor 23.10.: "Edelsteinbucht auch ueber den Modus und den Startknopf im Bot-Programm, nicht ueber den Command."
         GEMBAY("gembay", Sprache.t("Gem Bay", "Edelsteinbucht"), false),
         // Autor 23.10.: Portal mit Aufstieg bis Level und Farm-Liste (Felder im Bot-Fenster).
-        PORTAL("portal", "Portal", false);
+        PORTAL("portal", "Portal", false),
+        // Autor 18.11.: taegliche Spiel-Quests (Buch in der Burg -> Daily quests), haengt die passenden Modi an.
+        SPIELQUESTS("spielquests", Sprache.t("Daily game quests", "Tages-Spielquests"), false);
 
         /** So steht es hinter "!start". */
         public final String befehlswort;
@@ -77,6 +79,7 @@ public final class Befehlsbau {
             if (w.startsWith("hammer") || w.startsWith("event")) return HAMMER;
             if (w.startsWith("gem") || w.startsWith("edelstein")) return GEMBAY;
             if (w.startsWith("portal")) return PORTAL;
+            if (w.startsWith("spielquest") || w.startsWith("dailyquest")) return SPIELQUESTS;
             return null;
         }
     }
@@ -208,8 +211,9 @@ public final class Befehlsbau {
         return "!after " + auftrag(modus, anzahl, weg, bezahl, freund, List.of());
     }
 
-    private static String auftrag(Modus modus, int anzahl, String weg, Bezahlart bezahl, String freund,
-                                  List<String> extras) {
+    /** Der Auftrag ohne "!start" davor ("cathedral 50 c food") -- auch ein Eintrag der Warteschlange (Autor 15.11.). */
+    static String auftrag(Modus modus, int anzahl, String weg, Bezahlart bezahl, String freund,
+                          List<String> extras) {
         if (modus == null) throw new IllegalArgumentException(Sprache.t("Mode missing", "Modus fehlt"));
         StringBuilder b = new StringBuilder(modus.befehlswort);
         if (modus.mitAnzahl && anzahl > 0) b.append(' ').append(Math.min(anzahl, 100_000));

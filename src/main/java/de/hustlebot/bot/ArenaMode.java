@@ -328,7 +328,54 @@ public final class ArenaMode implements GameMode {
 
     /** Ab so viel Restzeit wird angegriffen: 25 s, auf langsamen PCs entsprechend frueher (hoechstens 45 s), dazu der Sicherheitsabstand. */
     long spaetestensS() {
-        return spaetestensSekunden(vorarbeitSchnittMs, new ArrayList<>(vorarbeitLetzte));
+        return spaetestensSekunden(vorarbeitSchnittMs, new ArrayList<>(vorarbeitLetzte), schilderDauerMs);
+    }
+
+    /**
+     * 15.11. / SMHD, 9XBW, YPBQ (ben, langsamer PC): das Namen-Lesen der Pyramide dauerte 20-50 s, die Runde war beim Klick
+     * schon um. Wie lange das letzte vollstaendige Lesen dauerte (steigt sofort, sinkt langsam), 0 = noch nicht gemessen.
+     * Verpasste Runden gingen nie in die Vorarbeit ein -- darum wird das Lesen selbst gemessen.
+     */
+    private volatile long schilderDauerMs;
+
+    /** 15.11. / SMHD, 9XBW, YPBQ: Namen werden hoechstens bis so viele Sekunden vor Stage-Ende gelesen, dann wird sofort angegriffen. */
+    static final long LESEN_BIS_REST_S = ABSTAND_ENDE_S;
+    /** Ohne lesbare Uhr: so lange darf das Lesen ab Beginn der Angriffsphase hoechstens dauern. */
+    static final long LESEN_OHNE_UHR_MS = 20_000;
+
+    /**
+     * 15.11. / SMHD, 9XBW, YPBQ: bis wann (Uhrzeit in ms) Namen gelesen werden duerfen, danach gilt fuer die uebrigen Schilder nur, was
+     * ohne Texterkennung zu sehen ist (Namensbild, Notizblock, Listenbilder). Mit Uhr: bis 10 s vor Stage-Ende; nie laenger als 40 s ab
+     * Beginn der Angriffsphase (falsch gelesene Uhr). Ohne Uhr: 20 s ab Beginn der Angriffsphase.
+     */
+    static long leseFrist(long jetzt, long restSekunden, long angriffsphaseSeit) {
+        long seit = angriffsphaseSeit > 0 && angriffsphaseSeit <= jetzt ? angriffsphaseSeit : jetzt;
+        long grenze = seit + (SPAETESTENS_HOECHSTENS_S - LESEN_BIS_REST_S) * 1000;
+        if (restSekunden < 0) return Math.min(grenze, seit + LESEN_OHNE_UHR_MS);
+        return Math.min(grenze, jetzt + Math.max(0, restSekunden - LESEN_BIS_REST_S) * 1000);
+    }
+
+    /** 15.11.: gemessene Lesedauer merken -- eine laengere gilt sofort, eine kuerzere nur zur Haelfte (langsame PCs schwanken stark). */
+    static long lesedauerMerken(long altMs, long neuMs) {
+        if (neuMs <= 0 || neuMs >= 120_000) return altMs;
+        return altMs <= 0 ? neuMs : Math.max(neuMs, (altMs + neuMs) / 2);
+    }
+
+    /** 15.11.: wurde das Lesen nach {@code gelesen} von {@code gesamt} Schildern abgebrochen, wie lange haette es ganz gedauert? */
+    static long volleLesedauer(long dauerMs, int gelesen, int gesamt) {
+        if (gelesen <= 0 || gesamt <= gelesen) return dauerMs;
+        return dauerMs * gesamt / gelesen;
+    }
+
+    /** 15.11.: reicht die Restzeit fuer ein Lesen dieser Dauer, ohne in die Angriffszeit hineinzureichen? (Uhr unbekannt: ja, wie bisher) */
+    static boolean lesenReichtVorAngriff(long restSekunden, long dauerMs, long spaetestensS) {
+        return restSekunden < 0 || restSekunden - (dauerMs + 999) / 1000 >= spaetestensS;
+    }
+
+    /** 15.11. / SMHD: Stopp oder Pause angefordert (Quit, Maus bewegt, !stop)? Lange Lese-Schritte brechen dann ab statt noch zu klicken. */
+    private static boolean angehalten() {
+        return !BEOB_LESER.equals(Thread.currentThread().getName())
+                && (BotEngine.stoppAngefordert() || BotEngine.pauseAngefordert());
     }
 
     /**
@@ -338,11 +385,20 @@ public final class ArenaMode implements GameMode {
      * (Schnitt) bleibt als Untergrenze. "Spaet angreifen" bleibt die Absicht: die Grenze liegt bei hoechstens 50 s von 120.
      */
     static long spaetestensSekunden(long schnittMs, List<Long> letzteMs) {
+        return spaetestensSekunden(schnittMs, letzteMs, 0);
+    }
+
+    /**
+     * 15.11. / SMHD, 9XBW, YPBQ: dazu die gemessene Dauer des Namen-Lesens plus 10 s -- auf bens PC (20-50 s Lesen) begann die
+     * Angriffsphase bei 25-32 s Rest und der Klick kam nach Rundenende. Auf schnellen PCs (5-6 s) aendert sich nichts.
+     */
+    static long spaetestensSekunden(long schnittMs, List<Long> letzteMs, long schilderDauerMs) {
         long alt = Math.min(45, SPAETESTENS_BEI_SEKUNDEN + Math.max(0, schnittMs / 1000 - 10));
         long schlechteste = 0;
         for (long l : letzteMs) schlechteste = Math.max(schlechteste, l);
         long mitAbstand = schlechteste > 0 ? schlechteste / 1000 + ABSTAND_ENDE_S : 0;
-        return Math.min(SPAETESTENS_HOECHSTENS_S, Math.max(alt, mitAbstand));
+        long mitLesen = schilderDauerMs > 0 ? (schilderDauerMs + 999) / 1000 + ABSTAND_ENDE_S : 0;
+        return Math.min(SPAETESTENS_HOECHSTENS_S, Math.max(Math.max(alt, mitAbstand), mitLesen));
     }
 
     /** Unter dieser Kampfstaerke gewinnt Autor nach eigener Aussage so gut wie immer. */
@@ -4204,7 +4260,10 @@ public final class ArenaMode implements GameMode {
         // damit Claude das Fenster kennt und das Ansehen des eigenen Teams bauen kann.
         // (08.10., 18:46: ein Klick aufs eigene Schild oeffnet nichts -- Autor: "Mein Team steht oben
         // im Vergleichsfenster, der Gegner unten." Das eigene Team wird darum dort angesehen.)
-        if (!allesErkundet && erkundenZeit && !zeitKnapp) {
+        // 15.11. / YPBQ: Durchschauen und Pals lesen erst alle Namen -- auf langsamen PCs 20 s und mehr. Nur anfangen, wenn
+        // das Lesen nicht in die Angriffszeit hineinreicht.
+        boolean namenReichen = lesenReichtVorAngriff(restSekunden, schilderDauerMs, spaetestensS());
+        if (!allesErkundet && erkundenZeit && !zeitKnapp && namenReichen) {
             Outcome e = erkundungStarten(screen, ctx, runde, restSekunden);
             if (e != null) return e;
         }
@@ -4213,10 +4272,12 @@ public final class ArenaMode implements GameMode {
         // mitten ins offene Pal-Fenster.
         boolean palZeit = restSekunden >= 0 ? restSekunden > erkundenBisS() + EXTRAS_BRAUCHT_S
                 : inDerRunde < RUNDE_SPAETESTENS_MS - 8_000 - EXTRAS_BRAUCHT_S * 1000;
-        if (allesErkundet && palZeit && !zeitKnapp && !nurErkunden) {
+        if (allesErkundet && palZeit && !zeitKnapp && !nurErkunden && namenReichen) {
             Outcome p = palBesuchStarten(screen, ctx);
             if (p != null) return p;
         }
+        // 15.11. / SMHD: ein Stopp waehrend des Namen-Lesens oben -- in diesem Schritt nichts mehr anklicken (Protokoll, Gegner).
+        if (angehalten()) return Outcome.WAITING;
         // Alle neun haben angegriffen: das Protokoll ist vollstaendig -- dann darf es
         // frueher losgehen, aber erst nach dem Durchschauen.
         // Autor 25.10. (TR5): sind Burgen faellig, erst den eigenen Angriff (nach dem Durchschauen), dann die Wartezeit fuer
@@ -4227,7 +4288,8 @@ public final class ArenaMode implements GameMode {
             // Das Kampfprotokoll schon waehrend des Wartens lesen (Autor, 01.10.), alle 20 s --
             // beim Waehlen ist es dann frisch und kostet keine 2 s mehr.
             // Pruefer 29.10.: nur, wenn das Lesen nicht in die Angriffszeit hineinreicht.
-            boolean reichtNoch = restSekunden < 0 || restSekunden - (protokollDauerMs + 999) / 1000 >= spaetestensS();
+            // 15.11. / 9XBW, YPBQ: spaetestensS() enthaelt jetzt auch die gemessene Dauer des Namen-Lesens.
+            boolean reichtNoch = lesenReichtVorAngriff(restSekunden, protokollDauerMs, spaetestensS());
             if (reichtNoch && (protokollFuerRunde != runde || System.currentTimeMillis() - protokollGelesenUm > 20_000)) {
                 protokollFuerRunde = -1;
                 Outcome p = protokollLesen(screen, ctx, runde);
@@ -4264,7 +4326,8 @@ public final class ArenaMode implements GameMode {
         // Ben 21.10.: unter 15 s Rest NICHT mehr lesen (das kostete auf langsamen PCs bis zu 25 s, die Runde verstrich)
         // -- dann gilt, was schon gelesen ist.
         // Pruefer 29.10.: 15 s + gemessene Lesedauer, in Runde 1 gar nicht (siehe protokollVorAngriff).
-        boolean protokollZeit = protokollVorAngriff(runde, restSekunden, protokollDauerMs);
+        // 15.11. / SMHD, 9XBW, YPBQ: danach muss auch das Namen-Lesen noch Platz haben (ben: Protokoll 10 s + Namen 21 s ab 32 s Rest).
+        boolean protokollZeit = protokollVorAngriff(runde, restSekunden, protokollDauerMs, schilderDauerMs);
         if (protokollZeit && (protokollFuerRunde != runde || System.currentTimeMillis() - protokollGelesenUm > 8_000)) {
             protokollFuerRunde = -1;
             Outcome p = protokollLesen(screen, ctx, runde);
@@ -4287,9 +4350,15 @@ public final class ArenaMode implements GameMode {
             // Geht nicht zu: nicht die Runde verklicken, sondern mit den Gegnern weitermachen, die zu sehen sind.
         }
 
-        List<Schild> schilder = schilderLesen(screen, ctx);
+        // 15.11. / SMHD, 9XBW, YPBQ: das Namen-Lesen hat eine Frist (bis 10 s vor Stage-Ende), danach sofort angreifen. Vorher lasen
+        // bens Bots 21-50 s weiter und klickten nach Rundenende ("Round missed").
+        List<Schild> schilder = schilderLesen(screen, ctx, leseFrist(System.currentTimeMillis(), restSekunden(), angriffsphaseSeit));
         if (schilder == VERDECKT) return Outcome.WAITING;   // Protokoll offen oder Banner: erst lesen, wenn die Schilder frei sind (Autor 01.11.)
-        bericht(schilder, runde, restSekunden, haekchen);
+        if (angehalten()) return Outcome.WAITING;   // 15.11. / SMHD: Stopp waehrend des Lesens -- kein Klick mehr
+        // 15.11. / SMHD, 9XBW: die Restzeit von JETZT (heruntergezaehlt seit der letzten Uhr), nicht die von vor dem Lesen --
+        // "29 s left" stand da, als die Runde schon um war.
+        long restNachLesen = restSekunden();
+        bericht(schilder, runde, restNachLesen, haekchen);
 
         if (schilder.isEmpty()) {
             // Nicht nur "nichts gefunden" melden, sondern WIE KNAPP es war.
@@ -4761,7 +4830,8 @@ public final class ArenaMode implements GameMode {
         if (protokollAufgeklapptUm > 0) {
             long dauer = protokollGelesenUm - protokollAufgeklapptUm;
             protokollAufgeklapptUm = 0;
-            if (dauer > 0 && dauer < 60_000) protokollDauerMs = (protokollDauerMs + dauer) / 2;
+            // 15.11. / 9XBW: der Schnitt allein lag bei ~4 s, gelesen wurde 10 s -- eine laengere Dauer gilt jetzt sofort.
+            if (dauer > 0 && dauer < 60_000) protokollDauerMs = lesedauerMerken(protokollDauerMs, dauer);
         }
         // Autor, 11.10.: "Der Bot kann den Battle-Log offen lassen, wenn er keinen Gegner ueberdeckt." Erst
         // nachsehen, WAS er ueberdeckt -- ein Foto je Runde vom offenen Protokoll.
@@ -4916,6 +4986,14 @@ public final class ArenaMode implements GameMode {
      * damit vom Tisch, denn jeder Gegner geht nur einmal.
      */
     private List<Schild> schilderLesen(Mat screen, BotContext ctx) {
+        return schilderLesen(screen, ctx, 0);
+    }
+
+    /**
+     * @param frist 15.11. / SMHD, 9XBW, YPBQ: Uhrzeit (ms), ab der die uebrigen Schilder ohne Texterkennung gelesen werden (Name nur aus
+     *              Namensbild/Notizblock, Belohnung nur gemerkt, sonst 150; die Listenbilder gelten weiter) -- 0 = ohne Frist.
+     */
+    private List<Schild> schilderLesen(Mat screen, BotContext ctx, long frist) {
         // Einmal je Runde reicht.
         //
         // Jedes Schild kostet einen eigenen PowerShell-Vorgang von rund
@@ -4954,6 +5032,8 @@ public final class ArenaMode implements GameMode {
 
         List<Schild> liste = new ArrayList<>();
         BufferedImage bild = ctx.frame();
+        long lesenAb = System.currentTimeMillis(), eiligAb = 0;   // 15.11.: Dauer messen (spaetestensS)
+        int vollGelesen = 0, eiligGelesen = 0;
 
         List<Matcher.Hit> eigene = ctx.matcher().findAll(screen, T_ME);
         if (!eigene.isEmpty()) eigenenNamenLesen(bild, eigene.get(0));   // Freunde: statt fest "autor"
@@ -4971,7 +5051,7 @@ public final class ArenaMode implements GameMode {
                 Log.info("Arena", Sprache.t("Round " + rundeZuletzt + ": I am at place " + aktuellerPlatz + ".", "Runde " + rundeZuletzt + ": ich auf Platz " + aktuellerPlatz + "."));
             }
         }
-        tabelleLesen(screen, ctx, bild);
+        if (frist <= 0 || lesenAb < frist) tabelleLesen(screen, ctx, bild);   // 15.11.: Frist schon um -- Tabelle wie zuletzt gelesen
         List<Matcher.Hit> bots   = ctx.matcher().findAll(screen, T_NOT_IN_CLAN);
         // Messung 01.11.: die Listenbilder (226 bei Autor) kosteten im ganzen Bild je ~33 ms, zusammen 6-9 s je Lesung -- so lange stand der Bot nach
         // jedem Sieg und beim ersten Blick auf die Pyramide. Gebraucht wird je Bild nur, ob es AUF EINEM SCHILD liegt (inFeld unten). Darum erst die
@@ -5026,6 +5106,21 @@ public final class ArenaMode implements GameMode {
             // Das eigene Schild ist kein Gegner.
             if (inFeld(eigene, x, y, b, SCHILD_HOEHE)) continue;
 
+            // 15.11. / SMHD: nach "Quit in the bot window" (14:03:53) las und klickte der Modus noch 7 s weiter.
+            if (angehalten()) {
+                Log.debug("Arena", "Stopp/Pause beim Namen-Lesen -- abgebrochen, kein Klick mehr.");
+                return VERDECKT;
+            }
+            // 15.11. / SMHD, 9XBW, YPBQ: Frist um -- die uebrigen Schilder ohne Texterkennung (Name aus Namensbild/Notizblock,
+            // Listenbilder wie immer), damit der Angriff noch in die Runde faellt.
+            boolean eilig = frist > 0 && System.currentTimeMillis() >= frist;
+            if (eilig && eiligGelesen == 0) eiligAb = System.currentTimeMillis();
+            if (eilig && eiligGelesen++ == 0) {
+                Log.info("Arena", Sprache.t("Time is short -- the remaining shields are read without text recognition "
+                                + "(name picture, notebook, list pictures), then the bot attacks.",
+                        "Zeit knapp -- die uebrigen Schilder ohne Texterkennung (Namensbild, Notizblock, Listenbilder), dann wird angegriffen."));
+            }
+
             // Im Schild stehen untereinander: Name, Clan, Punkte. Die
             // Texterkennung gibt sie als eigene Zeilen zurueck -- das ist
             // stabiler, als Pixelabstaende zu raten.
@@ -5035,12 +5130,15 @@ public final class ArenaMode implements GameMode {
             String beobFp = beobNamensbild(bild, ctx, r.centerX(), r.y());
             String[] gemerkt = beobFp == null ? null : beobNamen.get(beobFp);
             if (gemerkt != null) beobNamenTreffer++;
-            List<String> zeilen = gemerkt != null ? List.of() : ArenaLeser.liesNamenZeilen(bild, x, y, b, SCHILD_HOEHE);
+            List<String> zeilen = gemerkt != null || eilig ? List.of() : ArenaLeser.liesNamenZeilen(bild, x, y, b, SCHILD_HOEHE);
             String name, clan;
             boolean nameAusBand = false;
             if (gemerkt != null) {
                 name = gemerkt[0];
                 clan = gemerkt[1];
+            } else if (eilig) {
+                name = "";   // 15.11.: unten aus Namensbild bzw. Notizblock (Glyphen-Fingerabdruck, ~1-2 ms)
+                clan = "";
             } else {
                 // Autor 01.11. (Pruefung 3.137): Name und Clan nach LAGE. Die Zeilen der Texterkennung ueber das ganze Schild haben keine Lage und lassen oft
                 // eine weg ("~ЦИРИ~ / Myth Gods / 375" kam als ["Myth Gods", "375"]: der Clan rutschte auf Platz 1 und galt als Name). Darum werden das Clan-
@@ -5055,7 +5153,7 @@ public final class ArenaMode implements GameMode {
 
             // 29.10. (nur mit arena-regeln-neu.txt "an"): den NAMEN aus seinem Kasten mit PaddleOCR lesen -- an 40 von Hand
             // geprueften Schildern 29 richtig statt 19 (ArenaLeser.nameImKastenPaddle). Der Clan bleibt aus der alten Lesung.
-            if (gemerkt == null && de.hustlebot.core.ArenaRegelnNeu.an()) {
+            if (gemerkt == null && !eilig && de.hustlebot.core.ArenaRegelnNeu.an()) {
                 int oben = r.y() - SCHILD_HOEHE;
                 java.awt.Rectangle kasten = textKasten(bild, r.centerX() - (int) (ctx.width() * 0.046), oben + 12,
                         r.centerX() + (int) (ctx.width() * 0.070), oben + 33);
@@ -5141,7 +5239,7 @@ public final class ArenaMode implements GameMode {
                             + ": Namensbild " + bildName + " erkannt (gelesen: \"" + name + "\").");
                     name = bildName;
                 }
-            } else if (unleserlich(name) && rundeZuletzt <= 1
+            } else if (!eilig && unleserlich(name) && rundeZuletzt <= 1
                     && !inFeld(bots, x, y, b, SCHILD_HOEHE)              // "Not in clan" kommt nie wieder
                     && fingerabdruckAbgelehnt.add(r.centerX() / 20 + "," + r.y() / 20)) {   // je Schild ein Versuch
                 String neu = fingerabdruckAnlegen(bild, ctx, r.centerX(), r.y(), name);
@@ -5152,7 +5250,7 @@ public final class ArenaMode implements GameMode {
             }
 
             // Auf Zuruf (Autor, 02.10.: "Flimsy in ar_machbar"): Name aus arena-aufnehmen.txt.
-            if (!name.isBlank() && aufZurufAufnehmen(bild, ctx, r, name)) neueBilder = true;
+            if (!eilig && !name.isBlank() && aufZurufAufnehmen(bild, ctx, r, name)) neueBilder = true;
 
             // "+225" / "+150" ist weisse Schrift mit dunklem Rand: die normale Lesung fand sie auf KEINEM
             // Schild -- jeder Gegner galt als 150, 225er-Ziele wurden nie bevorzugt (02.10., Laeufe 1-8).
@@ -5161,12 +5259,12 @@ public final class ArenaMode implements GameMode {
             // Beim Zuschauen: dieselben weissen Ziffern an derselben Stelle sind dieselbe Belohnung.
             long lohnHash = beobFp == null ? 0 : weissHash(bild, r.x() - r.width() / 4, r.y() + r.height(), r.width() + r.width() / 2, hoeheZahl);
             Long lohnGemerkt = lohnHash == 0 ? null : beobBelohnung.get(lohnHash);
-            OptionalLong weiss = lohnGemerkt != null ? OptionalLong.empty() : ArenaLeser.zahlHinterWort(bild, r.x() - r.width() / 4, r.y() + r.height(),
+            OptionalLong weiss = lohnGemerkt != null || eilig ? OptionalLong.empty() : ArenaLeser.zahlHinterWort(bild, r.x() - r.width() / 4, r.y() + r.height(),
                     r.width() + r.width() / 2, hoeheZahl, "Zahl");
             boolean weissGut = weiss.isPresent() && weiss.getAsLong() >= 50 && weiss.getAsLong() <= 300;
             long punkte = lohnGemerkt != null ? lohnGemerkt : weissGut
                     ? weiss.getAsLong()
-                    : ArenaLeser.zahlUnter(bild, r, hoeheZahl).orElse(150);
+                    : eilig ? 150 : ArenaLeser.zahlUnter(bild, r, hoeheZahl).orElse(150);   // 15.11.: eilig wie unlesbar
             if (lohnHash != 0 && lohnGemerkt == null && weissGut) {
                 if (beobBelohnung.size() > 300) beobBelohnung.clear();
                 beobBelohnung.put(lohnHash, punkte);
@@ -5253,6 +5351,7 @@ public final class ArenaMode implements GameMode {
                     inFeld(clanTreffer, x, y, b, SCHILD_HOEHE), false, listeFast, listePause);
             Schild mitListe = mitAutoListe(schild);
             liste.add(mitListe);
+            if (!eilig) vollGelesen++;
             // Autor 01.11.: das Lesen dauert 5-6 s, der Stand gilt nur 5 s (ArenaStand.HALTBAR_MS) -- die Rahmen gingen mitten im Lesen aus. Der Bot-Faden klickt
             // waehrenddessen nichts; nach jedem Schild den Stand dieser Stage frisch halten (andere Stage: wird nicht erneuert, er verfaellt wie bisher).
             if (!BEOB_LESER.equals(Thread.currentThread().getName()) && de.hustlebot.schicht.ArenaStand.an()) {
@@ -5265,9 +5364,22 @@ public final class ArenaMode implements GameMode {
         }
         if (neueBilder) ctx.matcher().loadAll();   // die neuen Fingerabdruecke gleich kennen
 
+        // 15.11. / SMHD, 9XBW, YPBQ: wie lange das Namen-Lesen dauert, fuer spaetestensS() (nur der Bot-Faden; der Beobachter liest
+        // absichtlich langsam). Nach Fristende auf alle Schilder hochgerechnet -- sonst lernte der Bot die lange Dauer nie.
+        if (!BEOB_LESER.equals(Thread.currentThread().getName()) && vollGelesen > 0) {
+            long dauer = (eiligGelesen > 0 ? eiligAb : System.currentTimeMillis()) - lesenAb;
+            long ganz = volleLesedauer(dauer, vollGelesen, vollGelesen + eiligGelesen);
+            schilderDauerMs = lesedauerMerken(schilderDauerMs, ganz);
+            if (eiligGelesen > 0) {
+                Log.debug("Arena", "Namen-Lesen nach " + dauer / 1000 + " s bei der Frist: " + vollGelesen + " von " + (vollGelesen + eiligGelesen)
+                        + " Schildern ganz gelesen, ganz waeren es ~" + ganz / 1000 + " s (Angriff jetzt ab " + spaetestensS() + " s Rest).");
+            }
+        }
+
         // Stage 1: die Plaetze merken (Autor, 01.10.). Spaeter verschiebt sich die Pyramide,
         // der Bot findet die Gegner dann ueber den Namen wieder.
-        if (rundeZuletzt <= 1 && platzInStage1.isEmpty() && liste.size() >= 6) {
+        // 15.11.: nicht aus einer Lesung nach Fristende (Namen fehlen) -- dann bei der naechsten vollstaendigen.
+        if (rundeZuletzt <= 1 && platzInStage1.isEmpty() && liste.size() >= 6 && eiligGelesen == 0) {
             StringBuilder b = new StringBuilder();
             for (Schild s : liste) {
                 if (s.name().isBlank()) continue;
@@ -6207,9 +6319,13 @@ public final class ArenaMode implements GameMode {
         if (!de.hustlebot.core.ArenaRegelnNeu.an()) return;
         var e = de.hustlebot.core.SelbstKaempfe.entfernen(name);
         if (e == null || e.kaempfe().isEmpty()) return;
+        // 20.11. 23:12: Die folgenden "Notebook: ... lost in 27 s"-Zeilen sind ALTE Kaempfe (hier von 3.11.), die jetzt nachgebucht
+        // werden -- kein Doppelt-Buchen des gerade gewonnenen Kampfes. Das sagt der Hinweis vorab.
+        Log.info("Arena", Sprache.t("Own notebook: " + e.kaempfe().size() + " EARLIER fights against " + name
+                        + " are booked into the normal notebook now (the next Notebook lines are those old fights, not the current one).",
+                "Eigener Notizblock: " + e.kaempfe().size() + " FRUEHERE Kaempfe gegen " + name
+                        + " werden jetzt in den normalen Notizblock gebucht (die naechsten Notizblock-Zeilen sind diese alten Kaempfe, nicht der jetzige)."));
         for (var k : e.kaempfe()) buch.ergebnis(name, clan, k.sieg(), staerke, k.dauerS(), k.punkte(), (Glyphenschrift.Ergebnis) null);
-        Log.info("Arena", Sprache.t("Own notebook: " + e.kaempfe().size() + " fights against " + name + " moved to the normal notebook.",
-                "Eigener Notizblock: " + e.kaempfe().size() + " Kaempfe gegen " + name + " in den normalen Notizblock uebernommen."));
     }
 
     /** Ein Kampf gegen einen Spieler, den der Bot nicht kennt: nur in den eigenen Notizblock, ab dem dritten Kampf auf eine Liste. */
@@ -8197,8 +8313,17 @@ public final class ArenaMode implements GameMode {
      * attacked you and failed".
      */
     static boolean protokollVorAngriff(int runde, long restSekunden, long protokollDauerMs) {
+        return protokollVorAngriff(runde, restSekunden, protokollDauerMs, 0);
+    }
+
+    /**
+     * 15.11. / SMHD, 9XBW, YPBQ: nach dem Protokoll muessen noch die Namen gelesen werden (gemessene Dauer + 10 s), nicht nur 15 s --
+     * ben las bei 32 s Rest das Protokoll (10 s), dann 21 s Namen, der Klick kam nach Rundenende.
+     */
+    static boolean protokollVorAngriff(int runde, long restSekunden, long protokollDauerMs, long schilderDauerMs) {
         if (runde == 1) return false;
-        return restSekunden < 0 || restSekunden >= 15 + (protokollDauerMs + 999) / 1000;
+        long danach = Math.max(15, schilderDauerMs > 0 ? (schilderDauerMs + 999) / 1000 + LESEN_BIS_REST_S : 0);
+        return restSekunden < 0 || restSekunden >= danach + (protokollDauerMs + 999) / 1000;
     }
 
     // ==================================================================
@@ -8471,7 +8596,7 @@ public final class ArenaMode implements GameMode {
             }
             // Kraft auch nachtragen, wenn sie beim ersten Mal nicht lesbar war (30.09.).
             // Autor 24.10.: mit dem Namensbild aus der Pyramide -- landet so bei derselben Notiz, egal wie hier gelesen.
-            if (seine > 0 && !ohneClan && !werDaSteht.isBlank()) buch.merkeStaerke(werDaSteht, seinClan, seine, namensbildZu(werDaSteht));
+            if (seine > 0 && !ohneClan && !werDaSteht.isBlank()) buch.merkeStaerke(werDaSteht, seinClan, seine, mitFensterbild(namensbildZu(werDaSteht)));
 
             if (erkundet.add(schluessel)) {
                 // AUCH OHNE STAERKE vermerken. Vorher fiel ein Gegner, bei
@@ -8498,7 +8623,7 @@ public final class ArenaMode implements GameMode {
                 // derselbe Gegner stand am Ende zweimal darin.
                 listeSchreiben();
                 if (!ohneClan && seine > 0) {
-                    buch.merkeStaerke(werDaSteht, seinClan, seine, namensbildZu(werDaSteht));
+                    buch.merkeStaerke(werDaSteht, seinClan, seine, mitFensterbild(namensbildZu(werDaSteht)));
                 }
             }
         }
@@ -8814,7 +8939,7 @@ public final class ArenaMode implements GameMode {
                 schichtStandVeraltet = true;
                 if (!schluessel.isBlank() && !schluessel.equals(sk)) schildAlias.putIfAbsent(sk, schluessel);
                 if (!unleserlich(imKampfGegen.name()) && !de.hustlebot.core.NamensVergleich.keinName(imKampfGegen.name())) {
-                    buch.merkeStaerke(imKampfGegen.name(), imKampfGegen.clan(), seine, namensbildZu(imKampfGegen.name()));
+                    buch.merkeStaerke(imKampfGegen.name(), imKampfGegen.clan(), seine, mitFensterbild(namensbildZu(imKampfGegen.name())));
                 }
             }
         }
@@ -10484,6 +10609,7 @@ public final class ArenaMode implements GameMode {
      */
     private String[] gegnerNameLesen(BotContext ctx, BufferedImage bild,
                                      Optional<Matcher.Hit> schwerter) {
+        fensterSchriftbild = null;
         if (schwerter.isEmpty() || bild == null) return new String[]{"", ""};
         Matcher.Hit sw = schwerter.get();
 
@@ -10510,6 +10636,10 @@ public final class ArenaMode implements GameMode {
         int unten = sw.y() + sw.height();
         final int nameX = links;
         int breiteName = rechts - nameX;
+        // Autor 21.11.: der Name im Fenster auch als Schriftbild (schwarze Schrift, obere Haelfte des Namensbereichs --
+        // gemessen an 29 Fenster-Ausschnitten in logs\schmuckschrift). Der Notizblock erkennt den Spieler daran wieder,
+        // egal ob die Texterkennung "-UMPM-" oder "-ЦИРИ-" liest.
+        fensterSchriftbild = fensterSchriftbildLesen(bild, nameX, unten, breiteName, (int) (ctx.height() * 0.07) / 2);
         String[] baender = fensterBaender(bild, nameX, unten, rechts, ctx.height() / 770.0);
         String nameBand = baender[0], clanBand = baender[1];
         java.util.concurrent.atomic.AtomicReference<List<String>> ganzSpeicher = new java.util.concurrent.atomic.AtomicReference<>(List.of());
@@ -10525,6 +10655,30 @@ public final class ArenaMode implements GameMode {
             return new String[]{"", name};
         }
         return new String[]{name, clan};
+    }
+
+    /** Schriftbild des Namens im zuletzt gelesenen Vergleichsfenster (gegnerNameLesen), oder null. */
+    private de.hustlebot.core.Schriftbild fensterSchriftbild;
+
+    /** Der Namensbereich des Vergleichsfensters als Schriftbild (Art FENSTER), oder null. */
+    static de.hustlebot.core.Schriftbild fensterSchriftbildLesen(BufferedImage bild, int x, int y, int breite, int hoehe) {
+        if (bild == null) return null;
+        int x0 = Math.max(0, x), y0 = Math.max(0, y);
+        int x1 = Math.min(bild.getWidth(), x + breite), y1 = Math.min(bild.getHeight(), y + hoehe);
+        if (x1 - x0 < 20 || y1 - y0 < 8) return null;
+        try {
+            return de.hustlebot.core.Schriftbild.aus(bild.getSubimage(x0, y0, x1 - x0, y1 - y0), de.hustlebot.core.Schriftbild.FENSTER);
+        } catch (RuntimeException e) {
+            Log.debug("Arena", "Schriftbild im Fenster nicht gelesen: " + e);
+            return null;
+        }
+    }
+
+    /** Das Namensbild (Schild) samt Schriftbild aus dem Vergleichsfenster -- fuer den Notizblock. */
+    private Glyphenschrift.Ergebnis mitFensterbild(Glyphenschrift.Ergebnis e) {
+        de.hustlebot.core.Schriftbild f = fensterSchriftbild;
+        if (f == null) return e;
+        return e == null ? Glyphenschrift.Ergebnis.nurBild(f) : e.mitBild(f);
     }
 
     /** Namensband und Clanband des Vergleichsfensters lesen: {Name oder null, Clan oder null}. unten = Unterkante der gekreuzten Schwerter, f = Hoehe/770. */

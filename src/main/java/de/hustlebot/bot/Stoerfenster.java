@@ -50,6 +50,10 @@ public final class Stoerfenster {
     /** Das runde rote X oben rechts. */
     private static final String T_CLOSE_X = "close_x";
 
+    /** Autor 21.11.: Ueberschrift "Congratulations!" und gruener Knopf "Go to mailbox" (Bild vom Zweitkonto). */
+    static final String T_GLUECKWUNSCH = "st_glueckwunsch";
+    static final String T_ZUR_MAILBOX = "st_zur_mailbox";
+
     /** Die Einblendung "You have received a reward" waehrend eines Ereignisses. */
     private static final String T_EVENT_REWARD = "event_reward";
 
@@ -583,6 +587,47 @@ public final class Stoerfenster {
         return true;
     }
 
+    /** Knopf "Go to mailbox" im Fenster "Congratulations!" -- nur mit der Ueberschrift darueber (sonst kein Klick). */
+    static Optional<Matcher.Hit> glueckwunschKnopf(Mat screen, Matcher m) {
+        if (!m.has(T_GLUECKWUNSCH) || !m.has(T_ZUR_MAILBOX)) return Optional.empty();
+        // 0,8 statt 0,84: der Knopf kann leuchten; Ueberschrift UND Knopf muessen passen (echtes Bild 1,0, sonst unter 0,5).
+        Optional<Matcher.Hit> titel = m.find(screen, T_GLUECKWUNSCH, 0.8);
+        if (titel.isEmpty()) return Optional.empty();
+        Optional<Matcher.Hit> knopf = m.find(screen, T_ZUR_MAILBOX, 0.8);
+        // Der Knopf liegt unter der Ueberschrift (Bild 21.11.: gut 200 Bildpunkte tiefer, gleiche Mitte).
+        if (knopf.isEmpty() || knopf.get().centerY() <= titel.get().centerY()
+                || Math.abs(knopf.get().centerX() - titel.get().centerX()) > 120) return Optional.empty();
+        return knopf;
+    }
+
+    /**
+     * Autor 21.11.: Fenster "Congratulations! Operation completed successfully. See your mailbox for details" mit gruenem
+     * Knopf "Go to mailbox" und rotem X. Der Bot tippt auf "Go to mailbox" und schliesst die Mailbox SOFORT wieder (rotes
+     * X), dann geht es weiter. true = gehandelt (das Bild ist veraltet).
+     */
+    public static boolean glueckwunschMailbox(Mat screen, BotContext ctx, String woher) {
+        Optional<Matcher.Hit> knopf = glueckwunschKnopf(screen, ctx.matcher());
+        if (knopf.isEmpty()) return false;
+        Log.info(woher, Sprache.t("Window \"Congratulations\": open the mailbox and close it again right away.",
+                "Fenster \"Congratulations\": Mailbox oeffnen und gleich wieder schliessen."));
+        ctx.klick(knopf.get(), Sprache.t("Congratulations: Go to mailbox", "Congratulations: Go to mailbox (zur Mailbox)"));
+        ctx.sleepUntilChanged(2000);
+        long bis = System.currentTimeMillis() + 6000;
+        while (System.currentTimeMillis() < bis) {
+            Mat neu = ctx.refresh();
+            if (neu == null) break;
+            if (glueckwunschKnopf(neu, ctx.matcher()).isEmpty()
+                    && ctx.clickIfVisible(neu, T_CLOSE_X, Sprache.t("Close the mailbox right away", "Mailbox gleich wieder schliessen"))) {
+                ctx.sleepUntilChanged(1200);
+                return true;
+            }
+            ctx.sleep(400);
+        }
+        Log.warn(woher, Sprache.t("Mailbox: no red X found -- the emergency exit takes over.",
+                "Mailbox: kein rotes X gefunden -- das uebernimmt der Notausgang."));
+        return true;
+    }
+
     /**
      * AFK-Rauswurf: "My lord, are you still here? Refresh the game ..." mit dem
      * gruenen Knopf "Update". Er laedt das Spiel neu und bringt in die Burg.
@@ -609,6 +654,33 @@ public final class Stoerfenster {
     // (Texterkennung, nur wenn der Modus seit 8 s keinen Fortschritt hat), warten, alle 3 Minuten "Retry".
     private static final long WARTUNG_PRUEFEN_MS = 15_000, WARTUNG_RETRY_MS = 180_000;
     private static volatile long wartungGeprueftUm = 0, wartungSeit = 0, wartungRetryUm = 0;
+    /**
+     * 15.11. / 4GVL, 5MCQ (Karla, Arena ~04:50): "Maintenance -- The game server will shut down in 0s. The Arena is not available at
+     * the moment" mit "OK". Der Bot kannte nur das Fenster mit "closed"/"Retry" und klickte 3 min lang die Arena auf der Weltkarte an
+     * (das Fenster kam jedes Mal wieder). Nach "OK" ist das Fenster weg -- darum mindestens so lange warten, bevor der Modus weitermacht.
+     */
+    static final long WARTUNG_ANKUENDIGUNG_MS = 5 * 60_000L;
+    private static volatile long wartungMindestensBis = 0;
+
+    /** Welches Wartungsfenster der gelesene Text zeigt. */
+    enum WartungsFenster { KEINS, GESCHLOSSEN, ANKUENDIGUNG }
+
+    /**
+     * Ordnet den gelesenen Text (Kleinbuchstaben) ein. "maintenance" allein reicht nie (Code-Review 26.10.: "Server maintenance in
+     * 30 min" ist keine Wartung). Mit "closed"/"retry": die Server sind zu (#K4AL). Mit "not available"/"shut down" (15.11. / 4GVL,
+     * 5MCQ): die Wartung beginnt gleich, die Arena ist schon gesperrt -- "OK" druecken und warten.
+     */
+    static WartungsFenster wartungsFenster(String text) {
+        if (text == null || !text.contains("maintenance")) return WartungsFenster.KEINS;
+        if (text.contains("closed") || text.contains("retry")) return WartungsFenster.GESCHLOSSEN;
+        if (text.contains("not available") || text.contains("shut down") || text.contains("shutdown")) return WartungsFenster.ANKUENDIGUNG;
+        return WartungsFenster.KEINS;
+    }
+
+    /** 15.11.: wartet der Bot nach "OK" auf der Wartungs-Ankuendigung noch, auch wenn das Fenster schon weg ist? */
+    static boolean nochWarten(long jetzt, long mindestensBis) {
+        return mindestensBis > 0 && jetzt < mindestensBis;
+    }
 
     /** Seit wann die Wartung steht (0 = keine) -- nach 3 h gilt Warten nicht mehr als Fortschritt (Haenger-Meldung). */
     public static long wartungSeitMs() {
@@ -629,15 +701,38 @@ public final class Stoerfenster {
         if (bild == null) return wartungSeit != 0;
         String text = textIn(bild, 0.15, 0.10, 0.70, 0.35);
         // Code-Review 26.10.: "Server maintenance in 30 min" allein ist keine Wartung -- das Fenster sagt auch "closed"/"Retry".
-        boolean da = text.contains("maintenance") && (text.contains("closed") || text.contains("retry"));
-        if (!da) {
+        WartungsFenster art = wartungsFenster(text);
+        if (art == WartungsFenster.KEINS) {
+            // 15.11. / 4GVL: nach "OK" auf der Ankuendigung ist das Fenster weg, die Arena aber weiter gesperrt -- noch warten.
+            if (wartungSeit != 0 && nochWarten(jetzt, wartungMindestensBis)) return true;
             if (wartungSeit != 0) {
                 Log.info(woher, Sprache.t("Server maintenance is over after " + (jetzt - wartungSeit) / 60_000 + " min -- carrying on.",
                         "Server-Wartung nach " + (jetzt - wartungSeit) / 60_000 + " min vorbei -- weiter geht's."));
             }
             wartungSeit = 0;
+            wartungMindestensBis = 0;
             return false;
         }
+        if (art == WartungsFenster.ANKUENDIGUNG) {
+            if (wartungSeit == 0) {
+                wartungSeit = jetzt;
+                wartungRetryUm = jetzt;
+                Log.warn(woher, Sprache.t("Server maintenance is starting (\"not available at the moment\"). The bot presses \"OK\" and waits "
+                                + WARTUNG_ANKUENDIGUNG_MS / 60_000 + " minutes before trying again.",
+                        "Server-Wartung beginnt (\"not available at the moment\"). Der Bot drueckt \"OK\" und wartet "
+                                + WARTUNG_ANKUENDIGUNG_MS / 60_000 + " Minuten, bevor er es wieder versucht."));
+            }
+            wartungMindestensBis = jetzt + WARTUNG_ANKUENDIGUNG_MS;
+            // Nur klicken, wenn an der Stelle wirklich "OK" steht (gruener Knopf mittig unter dem Text, Spielbild 4GVL: 580,487 von 1159x770).
+            // Liest die Texterkennung das kurze "OK" nicht, nach 1 min trotzdem: der Text darueber ist in DIESEM Bild bestaetigt.
+            String knopf = textIn(bild, 0.40, 0.58, 0.20, 0.11);
+            if (knopf.contains("ok") || knopf.contains("0k") || jetzt - wartungSeit >= 60_000) {
+                ctx.input().click((int) (bild.getWidth() * 0.50), (int) (bild.getHeight() * 0.633), 6);
+                Log.action("Klick", woher + Sprache.t(": Server maintenance -- OK", ": Server-Wartung -- OK"));
+            }
+            return true;
+        }
+        wartungMindestensBis = 0;   // Server zu: ab jetzt entscheidet das Retry-Fenster, wann es weitergeht
         if (wartungSeit == 0) {
             wartungSeit = jetzt;
             wartungRetryUm = jetzt;

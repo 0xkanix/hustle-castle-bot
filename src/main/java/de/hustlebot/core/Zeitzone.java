@@ -55,6 +55,9 @@ public final class Zeitzone {
         KURZ.put("germany", "Europe/Berlin");
         KURZ.put("de", "Europe/Berlin");
         KURZ.put("bayern", "Europe/Berlin");
+        KURZ.put("mez", "Europe/Berlin");    // Konrad 19.11.: deutsche Abkuerzungen (CET kennt Java selbst)
+        KURZ.put("mesz", "Europe/Berlin");
+        KURZ.put("cest", "Europe/Berlin");
         KURZ.put("muenchen", "Europe/Berlin");
         KURZ.put("munich", "Europe/Berlin");
         KURZ.put("wien", "Europe/Vienna");
@@ -134,21 +137,33 @@ public final class Zeitzone {
         return zone().getId();
     }
 
-    /** Die Uhr, nach der der ganze Bot geht. */
+    /**
+     * Die Uhr, nach der der ganze Bot geht. Konrad 19.11.: der Augenblick kommt aus der {@link Weltuhr} (Rechneruhr,
+     * richtiggestellt mit der Zeit aus dem Netz) -- geht die Windows-Uhr falsch, rechnet der Bot trotzdem richtig.
+     */
     public static LocalDateTime jetzt() {
-        return LocalDateTime.now(zone());
+        return LocalDateTime.ofInstant(Weltuhr.jetzt(), zone());
     }
 
     public static LocalDate heute() {
-        return LocalDate.now(zone());
+        return jetzt().toLocalDate();
     }
 
     public static LocalTime uhrzeit() {
-        return LocalTime.now(zone());
+        return jetzt().toLocalTime();
     }
 
     public static ZonedDateTime jetztMitZone() {
-        return ZonedDateTime.now(zone());
+        return ZonedDateTime.ofInstant(Weltuhr.jetzt(), zone());
+    }
+
+    /**
+     * Ein Zeitpunkt der Rechneruhr ({@code System.currentTimeMillis()} plus etwas) als Ortszeit der Bot-Zone, richtig-
+     * gestellt mit der Weltuhr. Konrad 20.11. (Geschwister): "Fertig etwa" in Discord rechnete roh nach Berlin um und lag
+     * bei ihm 9 h daneben.
+     */
+    public static LocalDateTime ausRechnerMs(long rechnerMs) {
+        return LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(rechnerMs + Weltuhr.versatzMs()), zone());
     }
 
     /** Ein Lesefehler der Datei, sonst leer -- fuer die Anzeige, nicht fuers Protokoll. */
@@ -159,8 +174,25 @@ public final class Zeitzone {
     /**
      * Macht aus "Europe/Berlin", "berlin", "London", "utc" oder "+2" eine Zone. Leer, wenn nichts
      * davon passt -- dann bleibt alles, wie es ist.
+     *
+     * Konrad 19.11. (Geschwister): Passt das Ganze nicht, zaehlt das erste Wort ("Europe/Berlin (UTC+01:00)",
+     * "Berlin, Germany") und danach der Teil hinter dem letzten Schraegstrich ("Europa/Berlin").
      */
     public static Optional<ZoneId> verstehen(String eingabe) {
+        Optional<ZoneId> z = verstehenGanz(eingabe);
+        if (z.isPresent() || eingabe == null) return z;
+        String[] teile = eingabe.strip().split("[\\s,;()]+");
+        String erstes = teile.length > 0 ? teile[0] : "";
+        if (teile.length > 1 && !erstes.isEmpty()) {
+            z = verstehenGanz(erstes);
+            if (z.isPresent()) return z;
+        }
+        int schraeg = erstes.lastIndexOf('/');
+        if (schraeg >= 0 && schraeg < erstes.length() - 1) return verstehenGanz(erstes.substring(schraeg + 1));
+        return Optional.empty();
+    }
+
+    private static Optional<ZoneId> verstehenGanz(String eingabe) {
         if (eingabe == null) return Optional.empty();
         String e = eingabe.strip();
         if (e.isEmpty()) return Optional.empty();
@@ -263,10 +295,11 @@ public final class Zeitzone {
                 + " (UTC" + z.getOffset().getId().replace("Z", "+00:00") + ")";
     }
 
-    /** Eine Zeile fuer !settings und das Steuerprogramm. */
+    /** Eine Zeile fuer !settings und das Steuerprogramm (Konrad 19.11.: mit Hinweis, wenn die Windows-Uhr falsch geht). */
     public static String beschreibung() {
         String f = fehler;
-        return uhrText() + (f.isEmpty() ? "" : "  -- " + f);
+        String uhr = Weltuhr.hinweis();
+        return uhrText() + (uhr.isEmpty() ? "" : "  -- " + uhr) + (f.isEmpty() ? "" : "  -- " + f);
     }
 
     /** Die Namen, die man tippen kann (fuer die Hilfe). */

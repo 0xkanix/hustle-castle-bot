@@ -222,6 +222,8 @@ public final class CathedralMode implements GameMode {
     private static final String T_MOVE_ON       = "dc_move_on";
     private static final String T_CLAIM_REWARD  = "dc_claim_reward";
     private static final String T_FINISH_SELECT = "dc_finish_selection";
+    /** Das rote X der Kathedralen-Fenster (das allgemeine close_x passt darauf nicht, Autor 15.11. / F7Y7). */
+    static final String T_DC_CLOSE_X = "dc_close_x";
     /**
      * Der gruene "Finish selection" im Warnfenster "Are you sure you want to
      * finish the selection?". Ein eigener Knopf: er sitzt woanders, ist
@@ -339,6 +341,14 @@ public final class CathedralMode implements GameMode {
      */
     private long aufgestelltUm = 0;
     private static final long AUFGESTELLT_GILT_MS = 20_000;
+
+    /** Autor 21.11.: fehlen die Kaempferbilder dieses Kontos oder passen sie nicht, nimmt der Bot sie selbst auf. */
+    private final Kaempferbilder kaempferbilder = new Kaempferbilder("Kathedrale");
+
+    /** Rein pruefbar: wurde in den letzten {@link #AUFGESTELLT_GILT_MS} aufgestellt, gilt die Truppe als stehend. */
+    static boolean giltAlsAufgestellt(long jetzt, long aufgestelltUm) {
+        return aufgestelltUm > 0 && jetzt - aufgestelltUm < AUFGESTELLT_GILT_MS;
+    }
 
     // Hier stand einmal eine feste Klickstelle fuer den "Finish selection" im
     // Warnfenster, fuer den Fall dass die Vorlage dc_finish_yes fehlt.
@@ -664,6 +674,28 @@ public final class CathedralMode implements GameMode {
     private boolean fotozyklusEtage = false;
     /** Nach dem Wegpunkt gleich nach dem Kampfknopf sehen. */
     private boolean fotozyklusKampf = false;
+    /**
+     * 21.11.: nach dem Wegpunkt-Klick per Kastenblick auf Truppenbildschirm oder Fenster warten (lernwerte.txt:
+     * anlauf_kastenblick, Standard an; nur mit kastenblick). Siehe nachWegpunktZumKampf.
+     */
+    private boolean anlaufKastenblick = true;
+    /**
+     * 21.11. (Autor: "Deploy the best muss gar nicht gedrueckt werden, wenn die Aufstellung schon steht"): Schalter
+     * aufstellen_sparen (Standard aus). Siehe ohneAufstellenLosschlagen.
+     */
+    private boolean aufstellenSparen = false;
+    /** Stand die Truppe beim letzten Kampf (aufgestellt, ohne Warnung) und kam danach ein Segen (= Sieg)? */
+    private boolean truppeSteht = false;
+    /** Der laufende Kampf begann ohne Warnung -- wird beim Segen zu truppeSteht. */
+    private boolean kampfMitVollerTruppe = false;
+    /** Gefallene (unit_dead_bar) auf dem letzten Truppenbildschirm: -1 nicht gesucht, sonst die Anzahl. */
+    private int letzteTotenSuche = -1;
+    /** Der zuletzt angeklickte Wegpunkt ist ein einfacher Kampf (kein Boss, kein Waechter). */
+    private boolean wegpunktEinfach = false;
+    /** Wann zuletzt ohne "Deploy the best" losgeschlagen wurde. */
+    private long ohneAufstellenUm = 0;
+    /** Nach einer Warnung im Kampf ohne Aufstellen: fuer diese Sitzung nie wieder sparen. */
+    private boolean sparenGesperrt = false;
     /** Die Sieg-Animation antippen, damit "Home" frueher kommt. */
     private boolean siegAntippen = false;
     private long siegTippAbMs = 450;
@@ -677,6 +709,8 @@ public final class CathedralMode implements GameMode {
      * welchen Werten welcher Run lief.
      */
     private void lernwerteAnwenden(BotContext ctx) {
+        // Laeuft bei jedem Run-Start: das Sicherheitsnetz des Gedaechtnis-Klicks (Bauplan L1) zaehlt je Run.
+        gedaechtnisFehlklicks = 0;
         if (!lernwerte.neuLesen()) return;
         ctx.setWarteTakt(lernwerte.zahl("takt_ms"), lernwerte.zahl("blind_ms"));
         turboMinMs = lernwerte.zahl("turbo_min_ms");
@@ -686,10 +720,16 @@ public final class CathedralMode implements GameMode {
         nachKampfMs = lernwerte.zahl("nach_kampf_ms");
         fotozyklusEtage = lernwerte.an("fotozyklus_etage");
         fotozyklusKampf = lernwerte.an("fotozyklus_kampf");
+        anlaufKastenblick = lernwerte.an("anlauf_kastenblick");
+        aufstellenSparen = lernwerte.an("aufstellen_sparen");
         siegAntippen = lernwerte.an("sieg_antippen");
         siegTippAbMs = lernwerte.zahl("sieg_tipp_ab_ms");
         zweiterBlickMs = lernwerte.zahl("waechter_blick_ms");
         wegplanung = lernwerte.an("wegplanung");
+        gedaechtnisklick = lernwerte.an("gedaechtnisklick");
+        vorausweg = lernwerte.an("vorausweg");
+        wegsucheSchnell = lernwerte.an("wegsuche_schnell");
+        kartenKaesten = lernwerte.an("kartenkaesten");
         kastenblick = lernwerte.an("kastenblick");
         aufstellenMs = lernwerte.zahl("aufstellen_ms");
         Log.info("Lernwerte", lernwerte.zeile());
@@ -1384,6 +1424,7 @@ public final class CathedralMode implements GameMode {
         fremdeFensterZu = 0;
         eventAbbrueche = 0;
         folge = null;
+        kaempferbilder.neuerStart();   // Autor 21.11.: Kaempferbilder einmal je Modus-Start pruefen
         // Kreislauf ohne Ende (Autor, 29.09.): nach den Verlies-Runs zuerst ins Event.
         if (de.hustlebot.core.Eventautomatik.istAn() && de.hustlebot.core.Eventautomatik.eventZuerstAbholen()) {
             eventUnterwegs = true;
@@ -1402,11 +1443,14 @@ public final class CathedralMode implements GameMode {
         etageVergessen();
         insideCathedral = false;
         squadPrepared = false;
+        truppeSteht = false;
         blessingPicked = false;
         finishConfirmPending = false;
         choiceMade = false;
         battlePending = false;
         floorMapBlocked = 0;
+        wegpunktFensterOffen = false;
+        infokastenTipps = 0;
         aliveUnits.clear();
         aufstellVersuche = 0;
         aufgestelltUm = 0;
@@ -1440,6 +1484,27 @@ public final class CathedralMode implements GameMode {
     private long turboSchluesselVerdacht = -1;
     /** Wie oft hintereinander im Turbo 0 Schluessel gelesen wurden. */
     private int turboNullGesehen = 0;
+    /** Waren auf dem zuletzt gelesenen Teilnahmebild Ziffern zu lesen (auch wenn noch nicht geglaubt)? */
+    private boolean turboSchluesselLesbar = false;
+    /** Liessen sich die Schluessel in dieser Sitzung schon einmal lesen? Nur dann lohnt das Warten darauf. */
+    private boolean turboSchluesselJeGelesen = false;
+    /** Seit wann das Teilnahmefenster ohne lesbare Schluessel steht (0 = gerade nicht). */
+    private long teilnahmeUnlesbarSeit = 0;
+
+    /**
+     * 21.11.: Sind die Schluessel auf dem Teilnahmebild (noch) nicht zu lesen, verpufft "Participate" fast immer --
+     * gemessen: mit gelesenen Schluesseln folgte "Confirm" 162/163 (15.11.), 60/60 (14.11.), 19/19 (20.11.); ohne
+     * nur 1/93, 2/174, 0/15. Das Fenster baut sich noch auf; danach wartete der Bot jedes Mal die vollen 600 ms
+     * (Participate -> Participate 300-700 ms in 15 von 19 Runs am 20.11., am 14.11. bis zu 8 Klicks in 3 s).
+     * Darum kurz warten, bis die Ziffern stehen -- nur, wenn sie sich in dieser Sitzung schon lesen liessen, und
+     * hoechstens TEILNAHME_LESE_GEDULD_MS, danach wird wie bisher geklickt.
+     */
+    static boolean teilnahmeNochWarten(boolean lesbar, boolean jeGelesen, long unlesbarSeitMs, long geduldMs) {
+        return !lesbar && jeGelesen && unlesbarSeitMs >= 0 && unlesbarSeitMs < geduldMs;
+    }
+
+    /** So lange hoechstens auf lesbare Schluessel warten, bevor "Participate" trotzdem gedrueckt wird. */
+    static final long TEILNAHME_LESE_GEDULD_MS = 1500;
 
     /**
      * Schluessel im Turbo ablesen, ohne zu warten.
@@ -1454,6 +1519,7 @@ public final class CathedralMode implements GameMode {
      */
     private long turboSchluesselLesen(Mat screen, BotContext ctx) {
         long start = System.nanoTime();
+        turboSchluesselLesbar = false;
         if (!de.hustlebot.core.NumberReader.digitsAvailable(ctx.matcher(),
                 de.hustlebot.core.NumberReader.KEY_PREFIX)) return -1;
         for (String icon : ctx.matcher().names()) {
@@ -1461,6 +1527,8 @@ public final class CathedralMode implements GameMode {
             var wert = de.hustlebot.core.NumberReader.readRightOf(screen, ctx.matcher(), icon,
                     0.09, de.hustlebot.core.NumberReader.KEY_PREFIX);
             if (wert.isEmpty()) continue;
+            turboSchluesselLesbar = true;
+            turboSchluesselJeGelesen = true;
             long v = wert.getAsLong(), bisher = ctx.laufstatistik().keysNow();
             boolean passt = bisher < 0 || (v <= bisher && v >= bisher - 3) || v == turboSchluesselVerdacht;
             if (passt) {
@@ -1564,6 +1632,9 @@ public final class CathedralMode implements GameMode {
     public Outcome step(Mat screen, BotContext ctx, RunTracker runs) {
 
         schrittZaehler++;
+        // Autor 15.11. / F7Y7: nur wenn dieser Schritt wieder bei der Karte landet, wird weiter auf das Fenster gewartet.
+        boolean nurKarteSeitWegpunkt = wegpunktFensterOffen;
+        wegpunktFensterOffen = false;
 
         // Bezahlen (Teil A, 28.09.): laeuft ein Gang zur Burg (Nahrung ablesen)
         // oder durch die Tasche (Nahrungskisten), gehoert ihm der Schritt.
@@ -1599,10 +1670,11 @@ public final class CathedralMode implements GameMode {
         if (ctx.visibleIfKnown(screen, T_UPDATE) && Stoerfenster.autorIstDrin(screen, ctx)) {
             switch (Stoerfenster.anderesGeraet(screen, ctx, "Kathedrale")) {
                 case ANHALTEN -> { return Outcome.PAUSE; }
-                case GEKLICKT -> { return Outcome.ACTED; }
+                case GEKLICKT -> { keinKampfMehr(); return Outcome.ACTED; }   // L62X: das Spiel laedt neu
                 case NICHTS -> { }
             }
         } else if (click(screen, ctx, T_UPDATE, Sprache.t("Reconnect (Update)", "Verbindung neu aufbauen (Update)"))) {
+            keinKampfMehr();   // L62X: das Spiel laedt neu
             Log.info("Kathedrale", Sprache.t(
                     "AFK kick detected -- the game is reloaded via Update, waiting 20 seconds. "
                     + "After that it continues from the castle.",
@@ -1617,6 +1689,7 @@ public final class CathedralMode implements GameMode {
             switch (Stoerfenster.anderesGeraet(screen, ctx, "Kathedrale")) {
                 case ANHALTEN -> { return Outcome.PAUSE; }
                 case GEKLICKT -> {
+                    keinKampfMehr();   // das Spiel laedt neu -- ein laufender Kampf ist vorbei (L62X)
                     runs.progress(Sprache.t("Logged in again after the kick", "Nach Rauswurf neu angemeldet"));
                     return Outcome.ACTED;
                 }
@@ -1762,6 +1835,7 @@ public final class CathedralMode implements GameMode {
             // die Wartezeit fuers Antippen der Sieg-Animation neu beginnen.
             if (battlePending) {
                 kampfGestartetUm = System.currentTimeMillis();
+                warnungImKampf();
                 // 31.10. (Bericht NXWE, Ben): "Yes" nach Quick Attack heisst, der Kampf laeuft schon. Bisher sah der
                 // Bot noch den ausblendenden Truppenbildschirm, suchte 10 s "Quick Attack" und warnte faelschlich
                 // "No attack button" (Kampf 15,8 s statt 1,8 s). Darum gleich auf "Home" warten; kommt es nicht,
@@ -1797,6 +1871,7 @@ public final class CathedralMode implements GameMode {
         // Eine Kopie einer eigenen Einheit, die den Rest der Reise mitkaempft.
         // Steht vor der Etagenkarte, weil das Fenster darueber liegt.
         if (clickAny(screen, ctx, T_JOIN_SQUAD, Sprache.t("Put the ally in the squad", "Verbuendeten in die Truppe aufnehmen"))) {
+            truppeSteht = false;
             runs.progress(Sprache.t("Ally taken in", "Verbuendeten aufgenommen"));
             ctx.sleepUntilChanged(400);
             return Outcome.ACTED;
@@ -1870,6 +1945,7 @@ public final class CathedralMode implements GameMode {
         }
 
         if (choiceScreen) {
+            infokastenTipps = 0;   // die Wahl ist (wieder) zu sehen
             // Autor 24.10. (Ideenliste A33): "Belohnung -> Auswahl beenden -> Warnung bestaetigen -> Wegpunkt erledigt" als
             // Kastenblick-Kette (60 ms Takt, nur was gesehen wird) statt vier Mal die ganze Schrittkette: gemessen 0,81 s je
             // Fenster (0,39 + 0,20 + 0,21), ~4 Fenster je Run. Sind die Stellen der Knoepfe noch nicht bekannt, oder bleibt die
@@ -1959,34 +2035,7 @@ public final class CathedralMode implements GameMode {
                 Outcome leaving = endJourney(screen, ctx, runs);
                 if (leaving != null) return leaving;
             } else if (click(screen, ctx, T_NEXT_FLOOR, Sprache.t("Next floor", "Naechste Etage"))) {
-                if (onLastStage()) {
-                    // Nur melden, NICHT den Zaehler zuruecksetzen. floorsDone
-                    // zaehlt die tatsaechlich geklickten "Next floor" und ist
-                    // damit verlaesslich -- daneben lag nur die abgelesene
-                    // Zahl auf dem Sockel. Ein Reset waere sogar gefaehrlich:
-                    // Passt die gruene Vorlage nicht (bei Autor 0,69 statt
-                    // 0,88), ist floorsDone >= MAX_FLOORS der EINZIGE Weg, die
-                    // Reise zu beenden. Wuerde er staendig zurueckgesetzt,
-                    // endete die Reise nie.
-                    warnung(Sprache.t(
-                            "The number on the pedestal says last floor, but "
-                            + "\"Next floor\" is there -- the number was probably misread. "
-                            + "Continuing; floors are counted by the floor changes.",
-                            "Die Zahl auf dem Sockel sagt letzte Etage, aber "
-                            + "\"Next floor\" ist da -- die Zahl wurde wohl falsch gelesen. "
-                            + "Es geht weiter; gezaehlt wird nach den Etagenwechseln."));
-                }
-                etageAbschliessen(true);
-                floorsDone++;
-                etagenGesamt++;
-                currentStage = 0;   // wird auf der naechsten Karte neu gelesen
-                etageVergessen();
-                battlePending = false;
-                floorMapBlocked = 0;
-                etageLaedt = true;
-                Log.info("Kathedrale", Sprache.t("Floor cleared, on to the next one.", "Etage geschafft, weiter zur naechsten."));
-                runs.progress(Sprache.t("Floor cleared", "Etage geschafft"));
-                zeit.phase(Zeitbericht.ETAGE);
+                naechsteEtageVerbuchen(runs);
                 ctx.sleepUntilChanged(600);
                 return Outcome.ACTED;
             }
@@ -2009,6 +2058,9 @@ public final class CathedralMode implements GameMode {
         // --- 11. Etagenkarte. -------------------------------------------
         if (isFloorMap(screen, ctx)) {
             karteGefunden();
+            // Autor 15.11. / F7Y7: gerade ein Wegpunkt angeklickt und noch kein Fenster -- warten, keinen zweiten klicken.
+            Outcome fensterWarten = wegpunktFensterAbwarten(nurKarteSeitWegpunkt, ctx);
+            if (fensterWarten != null) return fensterWarten;
             return handleFloorMap(screen, ctx, runs);
         }
 
@@ -2019,11 +2071,13 @@ public final class CathedralMode implements GameMode {
         }
         // Fenster ist weg: beim naechsten Mal wieder auf die Zahlen warten.
         participationRead = false;
+        teilnahmeUnlesbarSeit = 0;
 
         // --- 13. Weltkarte: die Kathedrale suchen und anklicken. --------
         // 24.09.: dc_node wird ueberall im ganzen Bild gesucht (wandert). Ausser
         // waehrend der Suche auf der Weltkarte reicht jedes dritte Bild.
-        if (searchingCathedral || (schrittZaehler % 3 == 0 && ctx.visible(screen, T_NODE))) {
+        // Autor 21.11.: vorher nur "Home" unten links pruefen (billig) -- ohne ihn ist es nie die Weltkarte (sparte ~0,5 s je Run).
+        if (searchingCathedral || (schrittZaehler % 3 == 0 && Weltkarte.vielleichtKarte(screen, ctx) && ctx.visible(screen, T_NODE))) {
             return handleWorldMap(screen, ctx, runs);
         }
 
@@ -2067,6 +2121,7 @@ public final class CathedralMode implements GameMode {
             mapSwipes = 0;
             karteGeoeffnetUm = System.currentTimeMillis();
             insideCathedral = false;
+            keinKampfMehr();   // Autor 15.11. / L62X
             runs.progress(Sprache.t("World map opened", "Weltkarte geoeffnet"));
             ctx.sleepUntilChanged(600);
             return Outcome.ACTED;
@@ -2104,6 +2159,10 @@ public final class CathedralMode implements GameMode {
             ctx.sleepUntilChanged(1500);   // gemessen: 700 war 6 von 13 Mal zu kurz (max 758 ms)
             return Outcome.ACTED;
         }
+
+        // --- 14c. Wahlfenster, dessen Wahl Infokaesten verdecken (Autor 15.11. / F7Y7). ---
+        Outcome verdeckt = verdecktesWahlfensterLoesen(screen, ctx, runs);
+        if (verdeckt != null) return verdeckt;
 
         // --- 15. Nichts erkannt. ----------------------------------------
         //
@@ -2169,8 +2228,11 @@ public final class CathedralMode implements GameMode {
         }
 
         // Notausgang: unbekanntes Fenster mit rotem X wegklicken.
+        // X3A2: als Fortschritt nur, wenn sich das Bild danach wirklich geaendert hat.
         if (Stoerfenster.notausgang(screen, ctx, "Kathedrale", unknownScreens)) {
-            runs.progress(Sprache.t("Unknown window closed", "Unbekanntes Fenster geschlossen"));
+            if (BotContext.notausgangZaehlt(ctx.letzteWartungGeaendert())) {
+                runs.progress(Sprache.t("Unknown window closed", "Unbekanntes Fenster geschlossen"));
+            }
             return Outcome.ACTED;
         }
         if (unknownScreens > 150) {
@@ -2241,16 +2303,39 @@ public final class CathedralMode implements GameMode {
             }
             if (frisch > 0) turboNullGesehen = 0;
 
+            // 21.11.: Schluessel noch nicht lesbar -> das Fenster baut sich noch auf, ein Klick verpufft (siehe
+            // teilnahmeNochWarten). Kurz warten statt klicken.
+            if (frisch < 0 && ctx.visible(screen, T_PARTICIPATE)) {
+                long jetzt = System.currentTimeMillis();
+                if (turboSchluesselLesbar) {
+                    teilnahmeUnlesbarSeit = 0;
+                } else if (teilnahmeUnlesbarSeit == 0) {
+                    teilnahmeUnlesbarSeit = jetzt;
+                }
+                if (teilnahmeNochWarten(turboSchluesselLesbar, turboSchluesselJeGelesen,
+                        teilnahmeUnlesbarSeit == 0 ? -1 : jetzt - teilnahmeUnlesbarSeit,
+                        de.hustlebot.core.Rechnertempo.mal(TEILNAHME_LESE_GEDULD_MS))) {
+                    ctx.sleep(40);
+                    return Outcome.WAITING;
+                }
+            }
+
             Outcome stauVorher = teilnahmeStau(screen, ctx, runs);
             if (stauVorher != null) return stauVorher;
 
             if (turboKlick(screen, ctx, T_PARTICIPATE, Sprache.t("Participate in the cathedral", "An der Kathedrale teilnehmen"))) {
+                if (teilnahmeUnlesbarSeit > 0) {
+                    Log.debug("Kathedrale", "Teilnahme: " + (System.currentTimeMillis() - teilnahmeUnlesbarSeit)
+                            + " ms auf lesbare Schluessel gewartet" + (turboSchluesselLesbar ? "" : " (nicht lesbar, trotzdem)"));
+                }
+                teilnahmeUnlesbarSeit = 0;
                 karteGefunden();
                 runs.reiseBeginnt();   // ab hier zaehlt die Run-Zeit
                 lernwerteAnwenden(ctx);
                 zeit.start(ctx.gewartetMs());
                 teilnahmeVersuche++;
                 squadPrepared = false;
+                truppeSteht = false;
                 floorsDone = 0;
                 currentStage = 0;
                 etageVergessen();
@@ -2336,6 +2421,7 @@ public final class CathedralMode implements GameMode {
             lernwerteAnwenden(ctx);
             zeit.start(ctx.gewartetMs());
             squadPrepared = false;
+            truppeSteht = false;
             floorsDone = 0;
             currentStage = 0;
             etageVergessen();
@@ -2372,6 +2458,7 @@ public final class CathedralMode implements GameMode {
         lernwerteAnwenden(ctx);
         zeit.start(ctx.gewartetMs());
         squadPrepared = false;
+        truppeSteht = false;
         floorsDone = 0;
         currentStage = 0;
         etageVergessen();
@@ -2643,12 +2730,29 @@ public final class CathedralMode implements GameMode {
         mapSwipes = 0;
     }
 
+    /**
+     * Autor 15.11. / L62X (ben, 14.11. 20:23): "Von einem anderen Geraet angemeldet" kam MITTEN im Kampf. Nach Try
+     * again ging es ueber Burg und Weltkarte zurueck in die Kathedrale -- battlePending stand aber noch vom
+     * abgebrochenen Kampf, und isFloorMap() sperrte die gut sichtbare Etagenkarte (dc_floor_hint 0,98) fuer
+     * FLOOR_MAP_BLOCK_LIMIT Bilder: 20 s "nichts erkannt", Haenger-Bericht. In Burg und auf der Weltkarte laeuft kein
+     * Kampf mehr -- dort faellt der Schalter.
+     */
+    private void keinKampfMehr() {
+        if (battlePending) {
+            Log.debug("Kathedrale", "Burg/Weltkarte: der offene Kampf ist vorbei -- die Etagenkarte ist wieder frei.");
+        }
+        battlePending = false;
+        floorMapBlocked = 0;
+        wegpunktFensterOffen = false;
+    }
+
     /** Weltkarte: die Kathedrale finden, notfalls die Karte verschieben. */
     private Outcome handleWorldMap(Mat screen, BotContext ctx, RunTracker runs) {
         if (click(screen, ctx, T_NODE, Sprache.t("Open the Dark Cathedral", "Dunkle Kathedrale oeffnen"))) {
             searchingCathedral = false;
             mapSwipes = 0;
             burgStattKarte = 0;
+            keinKampfMehr();   // Autor 15.11. / L62X
             knotenGeklicktUm = System.currentTimeMillis();
             runs.progress(Sprache.t("Cathedral opened", "Kathedrale geoeffnet"));
             ctx.sleepUntilChanged(600);
@@ -2783,6 +2887,30 @@ public final class CathedralMode implements GameMode {
      * die zuletzt genutzte Aufstellung ist die eingespielte.
      */
     private Outcome handleGatherTroops(Mat screen, BotContext ctx, RunTracker runs) {
+        // 20.11. (Freunde-Bericht V8H9, 3.150): Trupp 6/10, "You need to deploy at least 8 units" -- der Bot druckte 92x in 40 s auf
+        // "Confirm", bis der Haenger-Alarm kam. Nach GATHER_WIRKUNGSLOS Aufrufen kurz hintereinander (der Bildschirm bleibt) ist
+        // Confirm wirkungslos: einmal "Deploy the best" (fuellt den Trupp), hilft das nicht, haelt der Bot ruhig an.
+        long jetzt = System.currentTimeMillis();
+        if (jetzt - gatherLetzterUm > GATHER_LUECKE_MS) { gatherAufrufe = 0; if (jetzt - gatherLetzterUm > 30_000) gatherBesteVersucht = false; }
+        gatherLetzterUm = jetzt;
+        gatherAufrufe++;
+        if (gatherAufrufe > GATHER_WIRKUNGSLOS) {
+            gatherAufrufe = 0;
+            if (!gatherBesteVersucht) {
+                gatherBesteVersucht = true;
+                Log.warn("Kathedrale", Sprache.t("Confirm had no effect " + GATHER_WIRKUNGSLOS + " times (squad probably incomplete) -- trying \"Deploy the best\" once.",
+                        "Confirm war " + GATHER_WIRKUNGSLOS + "x wirkungslos (Trupp wohl unvollstaendig) -- einmal \"Deploy the best\"."));
+                if (clickAny(screen, ctx, T_DEPLOY_BEST, Sprache.t("Deploy the best (squad incomplete)", "Deploy the best (Trupp unvollstaendig)"))) {
+                    ctx.sleepUntilChanged(600);
+                    return Outcome.ACTED;
+                }
+            }
+            warnung(Sprache.t("The squad cannot be confirmed (the game wants more units than are available, e.g. \"You need to deploy at least 8 units\"). "
+                            + "The bot stops here instead of pressing Confirm over and over. Please fill the squad by hand, then send !continue.",
+                    "Der Trupp wird nicht angenommen (das Spiel verlangt mehr Einheiten, als da sind, z. B. \"You need to deploy at least 8 units\"). "
+                            + "Der Bot haelt hier an, statt immer wieder auf Confirm zu druecken. Bitte den Trupp von Hand fuellen, dann !weiter."));
+            return Outcome.PAUSE;
+        }
         // Welcher Knopf: Autors Einstellung (!settings kathedrale ...).
         //
         // "previous": Die Aufstellung vom letzten Mal steht ohnehin schon,
@@ -2864,11 +2992,82 @@ public final class CathedralMode implements GameMode {
         return Outcome.WAITING;
     }
 
+    private static final int GATHER_WIRKUNGSLOS = 3;
+    private static final long GATHER_LUECKE_MS = 6_000;
+    private long gatherLetzterUm;
+    private int gatherAufrufe;
+    private boolean gatherBesteVersucht;
+
     /** So oft wird "Deploy the best" hoechstens gedrueckt, bevor Schluss ist. */
     private static final int AUFSTELL_MAX_VERSUCHE = 3;
 
     /** Wie oft "Deploy the best" auf diesem Bildschirm schon gedrueckt wurde. */
     private int aufstellVersuche;
+
+    /**
+     * 21.11. (Autor: "Deploy the best muss gar nicht gedrueckt werden, wenn die Aufstellung schon steht"): gleich
+     * "Quick Attack", ohne vorher "Deploy the best" (gemessen 127 ms je Kampf vom Aufstellen bis zum Angriff, ~21
+     * Kaempfe je Run). Nur mit Schalter aufstellen_sparen (Standard aus) und nur, wenn ALLES passt:
+     * der letzte Kampf dieser Etage begann ohne Warnung und endete mit einem Segen (Sieg), seitdem kein Fenster, kein
+     * Verbuendeter, keine Wiederbelebung; auf diesem Bild wurde nach Gefallenen gesucht und keiner gefunden; der
+     * Wegpunkt ist kein Boss und kein Waechter; "Quick Attack" ist sofort zu sehen. Kommt danach doch eine Warnung
+     * (etwa "Trupp unvollstaendig"), wird fuer den Rest der Sitzung wieder immer aufgestellt.
+     *
+     * @return null = wie bisher mit Aufstellen
+     */
+    private Outcome ohneAufstellenLosschlagen(BotContext ctx, RunTracker runs) {
+        if (!aufstellenSparbar(aufstellenSparen && kastenblick, sparenGesperrt, truppeSteht, letzteTotenSuche,
+                wegpunktEinfach)) {
+            return null;
+        }
+        Optional<Matcher.Hit> angriff = ctx.kastenBlick(0.84, T_QUICK_ATTACK, T_QUICK_ATTACK_ALT);
+        if (angriff.isEmpty()) return null;   // blendet noch ein: wie bisher aufstellen und dann angreifen
+        Log.action("Turbo", Sprache.t("Start battle without \"Deploy the best\" -- the squad is in place (",
+                "Kampf starten ohne \"Deploy the best\" -- die Truppe steht (") + angriff.get().name()
+                + Sprache.t(", box look)", ", Kastenblick)"));
+        ctx.input().click(angriff.get().centerX(), angriff.get().centerY(), 4);
+        ohneAufstellenUm = System.currentTimeMillis();
+        traegheitMessen(0);
+        kampfGestartet(runs);
+        return kampfAbwarten(ctx, runs);
+    }
+
+    /** Die Regel fuer ohneAufstellenLosschlagen, ohne Spiel pruefbar. */
+    static boolean aufstellenSparbar(boolean schalter, boolean gesperrt, boolean truppeSteht, int tote, boolean einfach) {
+        return schalter && !gesperrt && truppeSteht && tote == 0 && einfach;
+    }
+
+    /** Ein gewoehnlicher Kampf-Wegpunkt -- kein Boss (dc_minion) und kein Etagenwaechter? */
+    static boolean einfacherKampf(String vorlage, String grund) {
+        String v = vorlage == null ? "" : vorlage;
+        String g = grund == null ? "" : grund.toLowerCase();
+        return !v.startsWith("dc_minion") && !v.startsWith("dc_guardian")
+                && !g.contains("boss") && !g.contains("guardian") && !g.contains("waechter");
+    }
+
+    /** Der Segen kam: der Kampf war ein Sieg. Ohne Warnung im Kampf steht die Truppe weiter. */
+    private void segenNachKampf() {
+        truppeSteht = kampfMitVollerTruppe;
+        kampfMitVollerTruppe = false;
+    }
+
+    /** Warnung ("Yes") waehrend eines Kampfes: die Truppe gilt nicht mehr als vollstaendig. */
+    private void warnungImKampf() {
+        kampfMitVollerTruppe = false;
+        truppeSteht = false;
+        if (!sparenGesperrt && ohneAufstellenUm > 0
+                && System.currentTimeMillis() - ohneAufstellenUm < OHNE_AUFSTELLEN_WARNUNG_MS) {
+            sparenGesperrt = true;
+            warnung(Sprache.t(
+                    "A warning came after attacking without \"Deploy the best\" -- for the rest of this session the "
+                    + "squad is deployed before every fight again (aufstellen_sparen).",
+                    "Nach dem Angriff ohne \"Deploy the best\" kam eine Warnung -- fuer den Rest der Sitzung wird "
+                    + "wieder vor jedem Kampf aufgestellt (aufstellen_sparen)."));
+        }
+    }
+
+    /** So lange nach einem Angriff ohne Aufstellen gilt ein "Yes" als Warnung dazu (Home wird bis 3,5 s abgewartet). */
+    private static final long OHNE_AUFSTELLEN_WARNUNG_MS = 8000;
 
     /**
      * Truppenbildschirm an einem Wegpunkt.
@@ -2881,6 +3080,12 @@ public final class CathedralMode implements GameMode {
      */
     private Outcome handleSquad(Mat screen, BotContext ctx, RunTracker runs) {
 
+        // Autor 21.11. (Robin, anderes Konto): "Wenn er noch keine Bilder fuer diesen Account hat bezueglich den
+        // Einheiten, soll er sie machen und dann erst den gewuenschten Modus spielen." Einmal je Modus-Start, VOR
+        // "Deploy the best" (danach stehen die Besten oben -- auch die werden gefunden, aber vorher ist es eindeutig).
+        Outcome bilder = kaempferbilder.pruefen(screen, ctx);
+        if (bilder != null) return bilder;
+
         // Wiederbeleben hat Vorrang: mit einer Einheit weniger kaempft es sich
         // schlechter, und der Seelenstein ist reichlich vorhanden.
         Outcome revived = tryRevive(screen, ctx, runs);
@@ -2891,6 +3096,8 @@ public final class CathedralMode implements GameMode {
         // Durchlauf der Schrittkette. Faellt auf den normalen Weg zurueck, wenn
         // ein Knopf gerade nicht zu sehen ist.
         if (istTurbo()) {
+            Outcome ohne = ohneAufstellenLosschlagen(ctx, runs);
+            if (ohne != null) return ohne;
             // Autor, 26.09., mit Video: "bei jedem Stuetzpunkt, bevor er auf Quick
             // Attack drueckt, kurz auf Deploy the best druecken" -- sonst kam
             // nach einer gefallenen Einheit die Warnung "incomplete squad".
@@ -2977,8 +3184,10 @@ public final class CathedralMode implements GameMode {
         // "Deploy the best", gleich danach "Previous squad" -- das die beste
         // Aufstellung wieder ueberschreibt. Ohne diese Bilder gilt deshalb:
         // einmal aufgestellt heisst aufgestellt.
-        if (!kenntEigeneKaempfer(ctx)
-                && System.currentTimeMillis() - aufgestelltUm < AUFGESTELLT_GILT_MS) {
+        // Robin 21.11. (Bericht X3NQ, 3.142, Weg b): MIT eigenen Kaempferbildern, die nicht mehr passten, galt die Truppe
+        // nie als "steht" -- der Bot drueckte minutenlang "Deploy the best" (ohne Wirkung, die Truppe stand ja schon) und
+        // startete den Kampf nie. Jetzt gilt fuer alle: gerade aufgestellt heisst aufgestellt -> Kampf starten.
+        if (giltAlsAufgestellt(System.currentTimeMillis(), aufgestelltUm)) {
             if (startBattle(screen, ctx, runs)) return Outcome.ACTED;
             return Outcome.WAITING;
         }
@@ -3041,6 +3250,8 @@ public final class CathedralMode implements GameMode {
         siegTipps = 0;
         floorMapBlocked = 0;
         aufgestelltUm = 0;
+        truppeSteht = false;            // erst der Segen danach zeigt den Sieg
+        kampfMitVollerTruppe = true;    // faellt bei einer Warnung im Kampf
         runs.progress(Sprache.t("Battle started", "Kampf gestartet"));
         zeit.phase(Zeitbericht.KAMPF);
     }
@@ -3098,6 +3309,7 @@ public final class CathedralMode implements GameMode {
             ctx.input().click(ok.get().centerX(), ok.get().centerY(), 4);
         }
         etagennetz.letzterAbgeschlossen();   // einen Segen gibt es nur nach dem Sieg
+        segenNachKampf();
         runs.progress(Sprache.t("Blessing picked", "Segen gewaehlt"));
         zeit.phase(Zeitbericht.WEGWAHL);
         karteKommtNeu();   // ab jetzt steigt der Schriftzug ueber die Karte
@@ -3131,15 +3343,31 @@ public final class CathedralMode implements GameMode {
             segenWeg = ctx.warteBisWeg(SEGEN_NOCHMAL_MS, 0.80, T_BLESSING);
         }
         if (!segenWeg) return Outcome.ACTED;
+        // 21.11. (Hauptbot 7887159 vom 08.10., nie in die Freunde-Fassung uebernommen): auch die GRUENEN "End journey"
+        // in die Warteliste. Vorher wartete der Kastenblick auf der letzten Etage die vollen 1,5 s auf das ROTE
+        // end_journey, das dort nie kommt -- gemessen Segen -> End journey 1834 ms (20.11.) bzw. 1708 ms (15.11., 162
+        // Runs), Segen -> Next floor dagegen 393 bzw. 207 ms.
         Optional<Matcher.Hit> karte = ctx.warteAufKnopf(FOTOZYKLUS_MAX_MS, 0.84,
-                T_NEXT_FLOOR, T_FLOOR_HINT, T_END_JOURNEY);
+                T_NEXT_FLOOR, T_FLOOR_HINT, T_DC_END_JOURNEY, T_END_JOURNEY_GREEN, T_END_JOURNEY);
         if (karte.isEmpty()) return Outcome.ACTED;
         Mat frisch = ctx.refresh();
         if (frisch == null || ctx.visible(frisch, T_BLESSING)) return Outcome.ACTED;
         blessingPicked = false;
-        if (T_NEXT_FLOOR.equals(karte.get().name())
+        String getroffen = karte.get().name();
+        if (T_NEXT_FLOOR.equals(getroffen)
                 || (ctx.matcher().has(T_NEXT_FLOOR) && ctx.visible(frisch, T_NEXT_FLOOR))) {
-            return Outcome.ACTED;                    // Schritt 10 klickt "Next floor"
+            return naechsteEtageImKasten(frisch, ctx, runs, T_NEXT_FLOOR.equals(getroffen) ? karte.get() : null);
+        }
+        if (T_DC_END_JOURNEY.equals(getroffen) || T_END_JOURNEY_GREEN.equals(getroffen)) {
+            // Gruener "End journey": dieselbe Regel wie Schritt 10b (gruen muss besser passen als rot), nur ohne den
+            // Umweg ueber die ganze Schrittkette. Passt etwas nicht, entscheidet wie bisher der normale Ablauf --
+            // nie die Etagenkarte von hier aus (auf der fertigen letzten Etage gibt es nichts mehr anzusteuern).
+            if ((floorsDone >= MAX_FLOORS - 1 || onLastStage()) && journeyFinished(frisch, ctx)) {
+                Log.debug("Kathedrale", "Kastenblick Reise-Ende nach " + (System.currentTimeMillis() - los) + " ms");
+                Outcome ende = endJourney(frisch, ctx, runs);
+                if (ende != null) return ende;
+            }
+            return Outcome.ACTED;
         }
         if (isFloorMap(frisch, ctx)) {
             Log.debug("Kathedrale", "Kastenblick Etage nach " + (System.currentTimeMillis() - los) + " ms");
@@ -3191,6 +3419,7 @@ public final class CathedralMode implements GameMode {
      */
     private Outcome fensterKette(BotContext ctx, RunTracker runs) {
         ketteKlicks = 0;
+        truppeSteht = false;   // ein Fenster kann die Truppe aendern (Verbuendeter, Belohnung) -- danach aufstellen
         zeit.phase(Zeitbericht.AUSWAHL);
         String[] knoepfe = fensterKnoepfe(ctx, T_DEPLOY_SCREEN, T_FLOOR_HINT, T_END_JOURNEY,
                 T_BLESSING, T_NEXT_FLOOR);
@@ -3565,6 +3794,7 @@ public final class CathedralMode implements GameMode {
     /** So lange nach dem ersten Verdacht noch einmal hinsehen (Portraets laden noch). */
     private static final long TOT_BESTAETIGEN_MS = 300;
     private Outcome tryRevive(Mat screen, BotContext ctx, RunTracker runs) {
+        letzteTotenSuche = -1;   // gilt nur, wenn unten auf DIESEM Bild gesucht wird
         // Der Knopf hat zwei Aussehen. Wie ueberall gilt: jede Vorlage, deren
         // Name mit "dc_resurrect" beginnt, zaehlt als derselbe Knopf.
         if (variantsOf(ctx, T_RESURRECT).isEmpty()) return null;
@@ -3596,7 +3826,8 @@ public final class CathedralMode implements GameMode {
             return null;
         }
 
-        List<Matcher.Hit> dead = ctx.matcher().findAll(screen, T_UNIT_DEAD_BAR, 0.88, 12);
+        List<Matcher.Hit> dead = toteLeisten(screen, ctx);
+        letzteTotenSuche = dead.size();
         if (dead.isEmpty()) {
             totVerdachtSeit = 0;
             return null;
@@ -3643,6 +3874,7 @@ public final class CathedralMode implements GameMode {
                              + MAX_REVIVE_VERSUCHE + "]" : "")));
                 ctx.input().click(bar.centerX(), bar.centerY() - lift, 5);
                 lastCardAt = new int[]{bar.centerX(), bar.centerY()};
+                truppeSteht = false;
                 cooldowns.put("revive_click", System.currentTimeMillis() + 2500);
                 runs.progress(Sprache.t("Dead unit selected", "Tote Einheit gewaehlt"));
                 ctx.sleepUntilChanged(1000);
@@ -3650,6 +3882,28 @@ public final class CathedralMode implements GameMode {
             }
         }
         return null;
+    }
+
+    /**
+     * Die leeren roten Lebensleisten (gefallene Einheiten) auf dem Truppenbildschirm.
+     *
+     * Sparsam 21.11. (unit_dead_bar kostete 19-21x/~640 ms je Run im ganzen Bild): wie im Verlies nur ab knapp ueber der
+     * Zeile "Drag and drop units ..." nach unten. GEMESSEN an 53 Truppenbildschirmen der Kathedrale (Fotoserien aus
+     * Freunde-Berichten, 17.-29.10.): die Zeile lag immer bei y 405 (von 770); die gefallenen Einheiten stehen in der
+     * Ablage darunter (beide echten Leisten, Uebereinstimmung 0,93/0,94, bei y 567). Ueber der Zeile passte auf keinem
+     * Bild etwas ab 0,84 -- im ganzen Bild wie im Bereich kamen genau dieselben Leisten heraus. Ohne erkannte Zeile wie
+     * bisher im ganzen Bild.
+     */
+    private List<Matcher.Hit> toteLeisten(Mat screen, BotContext ctx) {
+        Optional<Matcher.Hit> zeile = ctx.matcher().has(T_DEPLOY_SCREEN) ? ctx.find(screen, T_DEPLOY_SCREEN) : Optional.empty();
+        if (zeile.isEmpty()) return ctx.matcher().findAll(screen, T_UNIT_DEAD_BAR, 0.88, 12);
+        return ctx.matcher().findAllImBereich(screen, T_UNIT_DEAD_BAR, 0.88, 12, toteBereich(zeile.get(), screen.width(), screen.height()));
+    }
+
+    /** Der Suchbereich fuer die Leisten: ab 40 Punkte (im Massstab des Bildes) ueber der Zeile bis unten, ganze Breite. */
+    static org.opencv.core.Rect toteBereich(Matcher.Hit zeile, int breite, int hoehe) {
+        int oben = Math.max(0, zeile.centerY() - (int) Math.round(40 * hoehe / 770.0));
+        return new org.opencv.core.Rect(0, oben, breite, hoehe - oben);
     }
 
     /**
@@ -3819,24 +4073,129 @@ public final class CathedralMode implements GameMode {
     }
 
     /**
+     * Steht die Etagenkarte offen da (Hinweis unten rechts, kein Fenster)? Wie isFloorMap, aber ohne dessen
+     * Zaehler und Sperren zu beruehren -- nur fuer das Sicherheitsnetz des Gedaechtnis-Klicks.
+     */
+    private boolean karteOhneFenster(Mat screen, BotContext ctx) {
+        if (battlePending || !ctx.matcher().has(T_FLOOR_HINT)) return false;
+        return ctx.visible(screen, T_FLOOR_HINT) && !overlayOpen(screen, ctx);
+    }
+
+    /**
+     * Bauplan L1 (Sicherheitsnetz, 09.10.): Ein Gedaechtnis-Klick wurde nicht angenommen. Die Stelle
+     * kommt aus "gerade besucht" heraus (sonst waere der Stuetzpunkt 6 s gesperrt), und ab dem zweiten
+     * Fall ist der Gedaechtnis-Klick fuer den Rest des Runs aus.
+     */
+    private void gedaechtnisKlickNichtAngenommen(int[] stelle) {
+        visited.removeIf(e -> e[0] == stelle[0] && e[1] == stelle[1]);
+        gedaechtnisFehlklicks++;
+        Log.warn("Kathedrale", Sprache.t("Memory click not accepted [" + stelle[0] + "," + stelle[1]
+                + "]: after the click came neither a fight nor a window, but the floor map again (case "
+                + gedaechtnisFehlklicks + " in this run).", "Gedaechtnis-Klick nicht angenommen [" + stelle[0] + "," + stelle[1]
+                + "]: nach dem Klick kam weder Kampf noch Fenster, sondern wieder die Etagenkarte (Fall "
+                + gedaechtnisFehlklicks + " in diesem Run)."));
+        if (gedaechtnisFehlklicks == GEDAECHTNIS_FEHLKLICKS_MAX) {
+            Log.warn("Kathedrale", Sprache.t("Memory click off for the rest of the run (" + gedaechtnisFehlklicks
+                    + " clicks not accepted). From the next run lernwerte.txt applies again.",
+                    "Gedaechtnis-Klick fuer den Rest des Runs aus (" + gedaechtnisFehlklicks
+                    + " nicht angenommene Klicks). Ab dem naechsten Run gilt wieder lernwerte.txt."));
+        }
+    }
+
+    /**
+     * Bauplan L2 (09.10.): Kastenblick NUR am vorausgeplanten Ziel. Dieselbe Vorlage muss hoechstens
+     * VORAUS_LUFT_PX neben der gemerkten Stelle mit der normalen Schwelle (0,84) zu finden sein, dort darf
+     * kein Schloss liegen, und die Stelle darf nicht gerade besucht sein.
+     *
+     * @return der Treffer im jetzigen Bild, oder null (dann die volle Auswertung)
+     */
+    private Matcher.Hit vorausNachsehen(Mat screen, BotContext ctx, Matcher.Hit ziel) {
+        long los = System.nanoTime();
+        int x0 = Math.max(0, ziel.x() - VORAUS_LUFT_PX);
+        int y0 = Math.max(0, ziel.y() - VORAUS_LUFT_PX);
+        int x1 = Math.min(screen.cols(), ziel.x() + ziel.width() + VORAUS_LUFT_PX);
+        int y1 = Math.min(screen.rows(), ziel.y() + ziel.height() + VORAUS_LUFT_PX);
+        if (x1 - x0 < ziel.width() || y1 - y0 < ziel.height()) return null;
+        Mat ausschnitt = new Mat(screen, new org.opencv.core.Rect(x0, y0, x1 - x0, y1 - y0));
+        Optional<Matcher.Hit> h;
+        try {
+            h = ctx.matcher().imAusschnitt(ausschnitt, x0, y0, ziel.name());
+        } finally {
+            ausschnitt.release();
+        }
+        String warum = null;
+        if (h.isEmpty() || h.get().score() < 0.84) {
+            warum = "Motiv nicht zu sehen";
+        } else {
+            List<Matcher.Hit> schloss = ctx.matcher().has(T_LOCK)
+                    ? ctx.matcher().findAllSchnell(screen, T_LOCK, new org.opencv.core.Rect(x0 - 40, y0 - 40,
+                            x1 - x0 + 80, y1 - y0 + 80), 0.70, 0.84, 4)
+                    : List.of();
+            if (isLocked(h.get(), schloss)) warum = "Schloss";
+            else if (recentlyVisited(h.get())) warum = "gerade besucht";
+        }
+        long ms = (System.nanoTime() - los) / 1_000_000;
+        if (warum != null) {
+            Log.debug("Kathedrale", "Vorausplanung verworfen (" + warum + ", " + ziel.name() + " bei "
+                    + ziel.centerX() + "," + ziel.centerY() + ", " + ms + " ms) -- volle Auswertung.");
+            return null;
+        }
+        Log.debug("Kathedrale", String.format("Vorausplanung bestaetigt (%s, Uebereinstimmung %.3f, %d ms).",
+                h.get().name(), h.get().score(), ms));
+        return h.get();
+    }
+
+    /** Anlauf-Kastenblick: so lange hoechstens auf Truppenbildschirm oder Fenster warten (mal Rechnertempo). */
+    static final long ANLAUF_KASTEN_MS = 900;
+
+    /** Nach dem Wegpunkt gleich per Kastenblick (oder Fotozyklus) weiter -- nicht bei Stopp oder Pause. */
+    private boolean anlaufImKasten() {
+        return (fotozyklusKampf || (anlaufKastenblick && kastenblick)) && !anhaltenGewuenscht();
+    }
+
+    /** Stopp, Pause oder Abbruch angefordert? Dann keine Kette mehr innerhalb eines Schritts. */
+    private static boolean anhaltenGewuenscht() {
+        return BotEngine.stoppAngefordert() || BotEngine.pauseAngefordert() || Thread.currentThread().isInterrupted();
+    }
+
+    /**
      * Fotozyklus nach dem Wegpunkt (lernwerte.txt: fotozyklus_kampf). Nur
      * fragen "Truppenbildschirm da?" -- dann gleich aufstellen und losschlagen.
      * Liegt stattdessen ein anderes Fenster oben (Auswahl, Warnung, Lager),
      * sofort zurueck in den normalen Ablauf, der kennt sie alle.
      * Gemessen vorher (26.09.): Wegpunkt -> Kampf starten 0,45 s.
+     *
+     * ANLAUF-KASTENBLICK (21.11.): Ohne fotozyklus_kampf laeuft hier nur der
+     * Kastenblick (Schalter anlauf_kastenblick). Der alte Hauptbot lief mit
+     * fotozyklus_kampf=an: 72 Runs am 09./10.11., Anlauf im Zeitbericht 8,7 s
+     * (Median), Run 61-63 s. Die Freunde-Fassung ohne diesen Weg: Anlauf
+     * 16-18 s, Run 74-78 s (24.10.-20.11., ueber 1000 Runs). Kommt in der
+     * Frist nichts Erwartetes, geht es wie ohne Kastenblick weiter: die
+     * naechste Runde der Schrittkette sieht das ganze Bild, und steht dort
+     * noch die Karte, gilt der F7Y7-Schutz (kein zweiter Wegpunkt, siehe
+     * aufWegpunktFensterWarten).
      */
     private Outcome nachWegpunktZumKampf(Mat screen, BotContext ctx, RunTracker runs) {
         long los = System.currentTimeMillis();
+        // Bauplan L1: War das ein Klick aus dem Gedaechtnis? Dann wird unten nachgeprueft, ob das Spiel
+        // ihn angenommen hat (nur einmal je Klick).
+        int[] gedaechtnis = gedaechtnisKlickStelle;
+        gedaechtnisKlickStelle = null;
 
         // KASTENBLICK (27.09.): Nur auf die Stellen sehen, an denen nach einem
         // Wegpunkt etwas erscheinen kann -- Truppenbildschirm ODER eines der
         // Fenster (Auswahl, Belohnung, Verbuendeter). Rund 8 ms je Blick statt
         // 60 bis 75. Erscheint nichts davon, geht es wie bisher am ganzen
         // Bild weiter.
-        if (kastenblick) {
-            String[] erwartet = fensterKnoepfe(ctx, T_DEPLOY_SCREEN, T_QUICK_ATTACK, T_QUICK_ATTACK_ALT);
-            long grenze = KASTEN_KAMPF_MS;
+        String[] erwartet = kastenblick ? fensterKnoepfe(ctx, T_DEPLOY_SCREEN, T_QUICK_ATTACK, T_QUICK_ATTACK_ALT)
+                                        : new String[0];
+        // Ohne eine einzige bekannte Stelle liefert kastenBlicke() sofort "nichts" -- die Schleife liefe heiss.
+        boolean imKasten = kastenblick && ctx.kastenBekannt(erwartet);
+        if (imKasten) {
+            long grenze = fotozyklusKampf ? KASTEN_KAMPF_MS
+                                          : de.hustlebot.core.Rechnertempo.mal(ANLAUF_KASTEN_MS);
             while (System.currentTimeMillis() - los < grenze) {
+                if (anhaltenGewuenscht()) break;
                 java.util.Map<String, Matcher.Hit> da = ctx.kastenBlicke(0.84, erwartet);
                 if (da.isEmpty()) continue;
                 long nach = System.currentTimeMillis() - los;
@@ -3864,13 +4223,29 @@ public final class CathedralMode implements GameMode {
                     // hat im Test 04:43 den Truppenbildschirm verspaetet.)
                     if (treffer(da, T_FINISH_SELECT) != null && !da.containsKey(T_QUICK_ATTACK)
                             && !da.containsKey(T_QUICK_ATTACK_ALT)) {
-                        grenze = KASTEN_FENSTER_MS;
+                        grenze = Math.max(grenze, KASTEN_FENSTER_MS);
                     }
                     continue;
                 }
                 Log.debug("Kathedrale", "Kastenblick Fenster nach " + nach + " ms");
-                return fensterKette(ctx, runs);
+                if (fotozyklusKampf) return fensterKette(ctx, runs);
+                // Wie im normalen Ablauf (Schritt 6): die Kette nur, wenn alle Knopfstellen bekannt sind und sie
+                // zuletzt etwas gedrueckt hat -- sonst die Einzelschritte im naechsten Durchgang.
+                return fensterKetteErlaubt(ctx) ? fensterKetteGeprueft(ctx, runs) : Outcome.ACTED;
             }
+        }
+        if (!fotozyklusKampf) {
+            // Bauplan L1 (Sicherheitsnetz): weder Kampf noch Fenster, sondern wieder die Etagenkarte -> der Klick aus dem
+            // Gedaechtnis ist nicht angekommen. wegpunktFensterOffen (F7Y7) bleibt an: ein spaetes Fenster darf keinen
+            // zweiten Klick ausloesen.
+            if (gedaechtnis != null && imKasten && !anhaltenGewuenscht()) {
+                Mat jetzt = ctx.refresh();
+                if (jetzt != null && karteOhneFenster(jetzt, ctx)) gedaechtnisKlickNichtAngenommen(gedaechtnis);
+            }
+            // Nichts Erwartetes in der Frist (oder Stopp/Pause): weiter wie ohne Kastenblick.
+            wegpunktFensterOffen = true;   // F7Y7: steht noch die Karte, keinen zweiten Wegpunkt anklicken
+            if (!imKasten) ctx.sleepUntilChanged(500);   // noch keine Stelle bekannt: genau wie bisher in goTo()
+            return Outcome.ACTED;
         }
         while (System.currentTimeMillis() - los < FOTOZYKLUS_MAX_MS) {
             screen = turboFrischSchnell(screen, ctx, segenTaktMs);
@@ -3881,6 +4256,9 @@ public final class CathedralMode implements GameMode {
                 return handleSquad(screen, ctx, runs);
             }
             if (overlayOpen(screen, ctx)) return Outcome.ACTED;
+        }
+        if (gedaechtnis != null && screen != null && karteOhneFenster(screen, ctx)) {
+            gedaechtnisKlickNichtAngenommen(gedaechtnis);
         }
         return Outcome.ACTED;
     }
@@ -3935,6 +4313,7 @@ public final class CathedralMode implements GameMode {
                 if (turboKlick(screen, ctx, T_BLESSING_OK, Sprache.t("Confirm blessing", "Segen bestaetigen"))) {
                     segenKartenKlicks = 0;
                     etagennetz.letzterAbgeschlossen();
+                    segenNachKampf();
                     runs.progress(Sprache.t("Blessing picked", "Segen gewaehlt"));
                     zeit.phase(Zeitbericht.WEGWAHL);
                     karteKommtNeu();   // ab jetzt steigt der Schriftzug ueber die Karte
@@ -3950,6 +4329,7 @@ public final class CathedralMode implements GameMode {
                         Sprache.t("Confirm blessing", "Segen bestaetigen"))) {
                     segenKartenKlicks = 0;
                     etagennetz.letzterAbgeschlossen();
+                    segenNachKampf();
                     runs.progress(Sprache.t("Blessing picked", "Segen gewaehlt"));
                     zeit.phase(Zeitbericht.WEGWAHL);
                     karteKommtNeu();
@@ -3965,6 +4345,7 @@ public final class CathedralMode implements GameMode {
         if (click(screen, ctx, T_BLESSING_OK, Sprache.t("Confirm blessing", "Segen bestaetigen"))) {
             segenKartenKlicks = 0;
             etagennetz.letzterAbgeschlossen();
+            segenNachKampf();
             runs.progress(Sprache.t("Blessing picked", "Segen gewaehlt"));
             zeit.phase(Zeitbericht.WEGWAHL);
             karteKommtNeu();   // ab jetzt steigt der Schriftzug ueber die Karte
@@ -4125,6 +4506,7 @@ public final class CathedralMode implements GameMode {
      * Belohnung mitnehmen.
      */
     private Outcome handleChoice(Mat screen, BotContext ctx, RunTracker runs) {
+        truppeSteht = false;   // wie in fensterKette
         zeit.phase(Zeitbericht.AUSWAHL);
 
         // Die Reihenfolge ist im Spiel fest vorgegeben und war hier einmal
@@ -4352,6 +4734,7 @@ public final class CathedralMode implements GameMode {
                 }
                 insideCathedral = false;
                 squadPrepared = false;
+                truppeSteht = false;
                 floorsDone = 0;
                 currentStage = 0;
                 cornerTapped = false;
@@ -4437,6 +4820,72 @@ public final class CathedralMode implements GameMode {
         // Gemeinsame Regel mit Verlies und Resten vom Verlies (29.09.).
         return Stoerfenster.gruenerEndJourney(screen, ctx, END_JOURNEY_MIN_SCORE,
                 T_DC_END_JOURNEY, T_END_JOURNEY_GREEN).isPresent();
+    }
+
+    /**
+     * "Next floor" und das "Yes" dahinter gleich nach dem Segen per Kastenblick statt ueber die ganze Schrittkette
+     * (Hauptbot 7887159, 08.10.; nachgezogen 21.11.). Gemessen 20.11.: Segen bestaetigt -> Next floor 393 ms, Next
+     * floor -> Yes 363 ms, zweimal je Run. Dieselben Regeln wie Schritt 10: erst gruen auf der letzten Etage (dann
+     * entscheidet Schritt 10), jeder Knopf nur einmal (gleiche Sperre wie click()), die Buchfuehrung ist dieselbe.
+     *
+     * @param treffer der Kastenblick-Treffer auf "Next floor" oder null (dann wird im frischen Bild gesucht)
+     */
+    private Outcome naechsteEtageImKasten(Mat frisch, BotContext ctx, RunTracker runs, Matcher.Hit treffer) {
+        if (onLastStage() && journeyFinished(frisch, ctx)) return Outcome.ACTED;   // Schritt 10 beendet die Reise
+        if (onCooldown(T_NEXT_FLOOR)) return Outcome.ACTED;
+        Optional<Matcher.Hit> weiter = treffer != null ? Optional.of(treffer) : ctx.matcher().find(frisch, T_NEXT_FLOOR);
+        if (weiter.isEmpty()) return Outcome.ACTED;
+        ctx.klick(weiter.get(), Sprache.t("Next floor (box look)", "Naechste Etage (Kastenblick)"));
+        cooldowns.put(T_NEXT_FLOOR, System.currentTimeMillis() + CLICK_COOLDOWN_MS);
+        unknownScreens = 0;
+        naechsteEtageVerbuchen(runs);
+        if (ctx.matcher().has(T_YES)) {
+            Optional<Matcher.Hit> ja = ctx.warteAufKnopf(NAECHSTE_ETAGE_JA_MS, 0.84, T_YES);
+            if (ja.isPresent() && !onCooldown(T_YES)) {
+                ctx.klick(ja.get(), Sprache.t("Confirm warning (Yes, box look)", "Warnung bestaetigen (Yes, Kastenblick)"));
+                cooldowns.put(T_YES, System.currentTimeMillis() + CLICK_COOLDOWN_MS);
+            }
+        }
+        return Outcome.ACTED;
+    }
+
+    /** So lange nach "Next floor" per Kastenblick auf das "Yes" der Nachfrage warten; danach Schritt 3 wie bisher. */
+    static final long NAECHSTE_ETAGE_JA_MS = 700;
+
+    /**
+     * Buchfuehrung nach dem Klick auf "Next floor" -- von Schritt 10 und vom Kastenblick nach dem Segen
+     * (kampfAbwarten) gemeinsam benutzt (Hauptbot 7887159, 08.10.; nachgezogen 21.11.).
+     */
+    private void naechsteEtageVerbuchen(RunTracker runs) {
+        if (onLastStage()) {
+            // Nur melden, NICHT den Zaehler zuruecksetzen. floorsDone
+            // zaehlt die tatsaechlich geklickten "Next floor" und ist
+            // damit verlaesslich -- daneben lag nur die abgelesene
+            // Zahl auf dem Sockel. Ein Reset waere sogar gefaehrlich:
+            // Passt die gruene Vorlage nicht (bei Autor 0,69 statt
+            // 0,88), ist floorsDone >= MAX_FLOORS der EINZIGE Weg, die
+            // Reise zu beenden. Wuerde er staendig zurueckgesetzt,
+            // endete die Reise nie.
+            warnung(Sprache.t(
+                    "The number on the pedestal says last floor, but "
+                    + "\"Next floor\" is there -- the number was probably misread. "
+                    + "Continuing; floors are counted by the floor changes.",
+                    "Die Zahl auf dem Sockel sagt letzte Etage, aber "
+                    + "\"Next floor\" ist da -- die Zahl wurde wohl falsch gelesen. "
+                    + "Es geht weiter; gezaehlt wird nach den Etagenwechseln."));
+        }
+        etageAbschliessen(true);
+        truppeSteht = false;   // neue Etage: der erste Kampf stellt wieder auf
+        floorsDone++;
+        etagenGesamt++;
+        currentStage = 0;   // wird auf der naechsten Karte neu gelesen
+        etageVergessen();
+        battlePending = false;
+        floorMapBlocked = 0;
+        etageLaedt = true;
+        Log.info("Kathedrale", Sprache.t("Floor cleared, on to the next one.", "Etage geschafft, weiter zur naechsten."));
+        runs.progress(Sprache.t("Floor cleared", "Etage geschafft"));
+        zeit.phase(Zeitbericht.ETAGE);
     }
 
     /**
@@ -4722,6 +5171,9 @@ public final class CathedralMode implements GameMode {
     private void etageVergessen() {
         visited.clear();
         waechterDieserEtage = null;
+        vorausZiel = null;          // Bauplan L2: gilt nur auf dieser Etage
+        vorausGrund = null;
+        gedaechtnisKlickStelle = null;
         karteKommtNeu();
         if (etagennetz.gespielteStuetzpunkte() > 0) {
             // "Bestmoeglich" ist am Ende gerechnet, wenn Anfang, Bosse und
@@ -4754,7 +5206,7 @@ public final class CathedralMode implements GameMode {
      * keinen Sockel, also keine Linie -- die Planung hat geraten, an welchem
      * Nachbarn er haengt, und fuenf Stuetzpunkte umsonst gespielt (14 statt 8).
      */
-    private static List<Matcher.Hit> sockelFuerNetz(Mat screen, boolean nurTuerkis) {
+    static List<Matcher.Hit> sockelFuerNetz(Mat screen, boolean nurTuerkis) {
         List<Matcher.Hit> alle = sockelKnoten(screen, false, nurTuerkis);
         int w = screen.cols(), h = screen.rows();
         List<Matcher.Hit> aus = new ArrayList<>();
@@ -4898,6 +5350,132 @@ public final class CathedralMode implements GameMode {
     private final Etagennetz etagennetz = new Etagennetz();
     /** Wegplanung an/aus (lernwerte.txt: wegplanung). Aus = die bisherige Wegsuche. */
     private boolean wegplanung = true;
+    /** Bauplan L1 (09.10.): verdeckten naechsten Stuetzpunkt aus dem Gedaechtnis anklicken (lernwerte.txt: gedaechtnisklick). */
+    private boolean gedaechtnisklick = false;
+    /** Sicherheitsnetz L1: so oft wurde in diesem Run ein Gedaechtnis-Klick nicht angenommen. */
+    private int gedaechtnisFehlklicks = 0;
+    /** Ab so vielen nicht angenommenen Gedaechtnis-Klicks ist der Schalter fuer den Rest des Runs aus. */
+    private static final int GEDAECHTNIS_FEHLKLICKS_MAX = 2;
+    /** Stelle des letzten Gedaechtnis-Klicks, bis nachWegpunktZumKampf nachgesehen hat (sonst null). */
+    private int[] gedaechtnisKlickStelle = null;
+    /** Bauplan L2 (09.10.): naechsten Schritt schon beim Klick ausrechnen (lernwerte.txt: vorausweg). */
+    private boolean vorausweg = false;
+    /** Der vorausgeplante naechste Schritt (Motiv an seiner Stelle) und sein Grund; null = keiner. */
+    private Matcher.Hit vorausZiel = null;
+    private String vorausGrund = null;
+    /** Kastenblick am vorausgeplanten Ziel: so weit darf das Motiv von der gemerkten Stelle abweichen. */
+    private static final int VORAUS_LUFT_PX = 25;
+    /** Wegwahl: Schloesser/Stuetzpunkte/Fragezeichen erst im halben Bild suchen (lernwerte.txt: wegsuche_schnell). */
+    private boolean wegsucheSchnell = true;
+
+    // --- 21.11. (Autor): AUF EINER FESTEN KARTE NUR AN DEN STUETZPUNKTEN SUCHEN. -----------------------------------------
+    // "Der Bot erkennt am Anfang, welches Muster die Etage hat, und sucht dann nur noch an den Positionen der Wegpunkte."
+    // Gemessen in den Nachtprotokollen vom 21.11. (204 Runs): dc_minion 34x/380 ms, dc_guardian 31x/318 ms je Run im
+    // ganzen Bild, dazu je Blick ~45 ms fuer die Motive und ~20 ms fuer Schloesser/Fragezeichen in der Halbbild-Suche.
+    // Erkannt ist die Karte, sobald das Etagennetz sie gefunden hat (erster Blick mit zehn Sockeln); bis dahin, und auf
+    // jedem Bild, das die Karte nicht sicher zeigt (Schriftzug davor, schon die naechste Etage), wie bisher im ganzen
+    // Bild. Geprueft an 232 echten Etagenbildern: dieselben Treffer (KathedraleKartenKaestenTest).
+
+    /** lernwerte.txt: kartenkaesten (Standard an). */
+    private boolean kartenKaesten = true;
+    private Mat kaestenBild;
+    private List<org.opencv.core.Rect> kaestenJetzt;
+    private Mat netzSockelBild;
+    private List<Matcher.Hit> netzSockelJetzt = List.of();
+
+    /** Die Sockel fuer das Wegenetz (sockelFuerNetz ohne Tuerkis-Filter), je Bild nur einmal gerechnet. */
+    private List<Matcher.Hit> netzSockel(Mat screen) {
+        if (screen != netzSockelBild) {
+            netzSockelBild = screen;
+            netzSockelJetzt = sockelFuerNetz(screen, false);
+        }
+        return netzSockelJetzt;
+    }
+
+    /**
+     * Wo auf diesem Bild die Mitte eines Symbols liegen kann (je Stuetzpunkt der festen Karte ein Kasten), oder null:
+     * dann wie bisher im ganzen Bild suchen.
+     */
+    private List<org.opencv.core.Rect> symbolKaesten(Mat screen) {
+        if (!kartenKaesten || !etagennetz.festeKarte()) return null;
+        if (screen != kaestenBild) {
+            kaestenBild = screen;
+            kaestenJetzt = etagennetz.symbolKaesten(netzSockel(screen), screen.cols(), screen.rows());
+        }
+        return kaestenJetzt;
+    }
+
+    /** Alle Treffer einer Vorlage auf der Etagenkarte: an den Stuetzpunkten der festen Karte oder wie bisher. */
+    private List<Matcher.Hit> kartenTreffer(Mat screen, BotContext ctx, String name, int maxHits) {
+        List<org.opencv.core.Rect> kaesten = symbolKaesten(screen);
+        if (wegsucheSchnell) {
+            return kaesten != null
+                    ? ctx.matcher().findAllSchnellInKaesten(screen, name, kaesten, kartenBereich(screen), 0.70, 0.84, maxHits)
+                    : ctx.matcher().findAllSchnell(screen, name, kartenBereich(screen), 0.70, 0.84, maxHits);
+        }
+        return kaesten != null ? ctx.matcher().findAllInKaesten(screen, name, 0.84, maxHits, kaesten)
+                               : ctx.matcher().findAll(screen, name, 0.84, maxHits);
+    }
+
+    // --- Unbekanntes Etagenmuster (Autor 21.11.: "Fehlerbericht an Claude, und so lange ueberarbeiten, bis kein Muster
+    // mehr unbekannt ist"). Je Fingerabdruck hoechstens ein Bericht am Tag, zusammen hoechstens drei am Tag; die Etage
+    // spielt der Bot wie bisher zu Ende (gelerntes Netz, Suche im ganzen Bild).
+    static final java.nio.file.Path MUSTER_GEMELDET = java.nio.file.Path.of("etagenmuster-gemeldet.txt");
+    private static final int MUSTER_BERICHTE_JE_TAG = 3;
+
+    private void unbekanntesMusterMelden(Mat screen, String abdruck, String beschreibung) {
+        Log.warn("Kathedrale", Sprache.t("Unknown floor pattern (" + abdruck + "): " + beschreibung
+                        + ". This floor is played with the search over the whole picture.",
+                "Unbekanntes Etagenmuster (" + abdruck + "): " + beschreibung
+                        + ". Diese Etage wird mit der Suche im ganzen Bild gespielt."));
+        etagenFoto(screen, "muster-" + abdruck);
+        if (!musterMeldenErlaubt(MUSTER_GEMELDET, java.time.LocalDate.now().toString(), abdruck)) return;
+        byte[] png = null;
+        org.opencv.core.MatOfByte puffer = new org.opencv.core.MatOfByte();
+        try {
+            if (org.opencv.imgcodecs.Imgcodecs.imencode(".png", screen, puffer)) png = puffer.toArray();
+        } catch (Exception e) {
+            // ohne Bild geht der Bericht mit dem jetzigen Spielbild raus
+        } finally {
+            puffer.release();
+        }
+        BotEngine.berichtMelden(Sprache.t("Unknown floor pattern in the Dark Cathedral (fingerprint " + abdruck + "): "
+                        + beschreibung + ". The bot finishes this floor with the old search over the whole picture. "
+                        + "Picture: the floor map at that moment.",
+                "Unbekanntes Etagenmuster in der Kathedrale (Fingerabdruck " + abdruck + "): " + beschreibung
+                        + ". Der Bot spielt diese Etage mit der alten Suche im ganzen Bild zu Ende. Bild: die Etagenkarte "
+                        + "in diesem Augenblick."), png);
+    }
+
+    /**
+     * Darf dieses Muster heute gemeldet werden? Je Fingerabdruck einmal am Tag, zusammen hoechstens
+     * MUSTER_BERICHTE_JE_TAG. Merkt die Meldung in der Datei (Zeilen "Tag Fingerabdruck"), damit ein Neustart nicht
+     * noch einmal meldet.
+     */
+    static synchronized boolean musterMeldenErlaubt(java.nio.file.Path datei, String tag, String abdruck) {
+        List<String> zeilen = new ArrayList<>();
+        try {
+            if (java.nio.file.Files.exists(datei)) zeilen.addAll(java.nio.file.Files.readAllLines(datei));
+        } catch (Exception e) {
+            // unlesbar: wie leer
+        }
+        int heute = 0;
+        for (String z : zeilen) {
+            if (!z.startsWith(tag + " ")) continue;
+            if (z.equals(tag + " " + abdruck)) return false;
+            heute++;
+        }
+        if (heute >= MUSTER_BERICHTE_JE_TAG) return false;
+        List<String> neu = new ArrayList<>();
+        for (String z : zeilen) if (z.startsWith(tag + " ")) neu.add(z);   // aeltere Tage fallen weg
+        neu.add(tag + " " + abdruck);
+        try {
+            java.nio.file.Files.write(datei, neu);
+        } catch (Exception e) {
+            // nicht merkbar: trotzdem melden
+        }
+        return true;
+    }
 
     /**
      * Darf jetzt etwas Endgueltiges entschieden werden (zum Waechter gehen,
@@ -4939,15 +5517,28 @@ public final class CathedralMode implements GameMode {
         teilnahmeErholungen = 0;
         forgetOldVisits();
 
+        // --- Bauplan L2 (09.10., Schalter vorausweg): DER VORAUSGEPLANTE SCHRITT. ---------------------
+        // Beim letzten Klick wurde der naechste Schritt schon ausgerechnet. Ist der Stuetzpunkt fertig
+        // (Segen / "Waypoint completed") und steht genau dieses Motiv ohne Schloss an seiner Stelle, wird
+        // es sofort angeklickt -- ohne volle Auswertung. Sonst (Schriftzug davor, Schloss, nichts) wie bisher.
+        Matcher.Hit voraus = vorausZiel;
+        String vorausWarum = vorausGrund;
+        vorausZiel = null;
+        vorausGrund = null;
+        if (voraus != null && vorausweg && wegplanung && route != Route.FULL
+                && etagennetz.festeKarte() && etagennetz.letzterFertig()) {
+            Matcher.Hit da = vorausNachsehen(screen, ctx, voraus);
+            if (da != null) return goTo(ctx, runs, da, vorausWarum + " (vorausgeplant)");
+        }
+
+
         // Hier steht die Zahl auf dem Sockel offen sichtbar -- der beste Ort,
         // um die aktuelle Etage abzulesen.
         long zeit0 = System.nanoTime();
         readStage(screen, ctx);
         etageBeobachten(screen, ctx);   // Bosse/Waechter fuer !stats
 
-        List<Matcher.Hit> locks = ctx.matcher().has(T_LOCK)
-                ? ctx.matcher().findAll(screen, T_LOCK, 0.84, 20)
-                : List.of();
+        List<Matcher.Hit> locks = ctx.matcher().has(T_LOCK) ? kartenTreffer(screen, ctx, T_LOCK, 20) : List.of();
         long zeit1 = System.nanoTime();
 
         // Wo liegt der Waechter?
@@ -5034,10 +5625,14 @@ public final class CathedralMode implements GameMode {
             long zeit2 = System.nanoTime();
             List<Matcher.Hit> offeneJetzt = openWaypoints(screen, ctx, locks);
             offeneJetzt.removeIf(this::recentlyVisited);
+            List<Matcher.Hit> gesperrtJetzt = new ArrayList<>(gesperrteMotive);
+            gesperrtJetzt.removeIf(this::recentlyVisited);
             long zeit3 = System.nanoTime();
             boolean reif = entscheidungReif(verdeckt);
-            etagennetz.beobachten(screen, sockelFuerNetz(screen, false), sockelFuerNetz(screen, true),
-                    fragenJetzt, bosseJetzt, guardian, offeneJetzt, locks, reif);
+            etagennetz.beobachten(screen, netzSockel(screen), sockelFuerNetz(screen, true),
+                    fragenJetzt, bosseJetzt, guardian, offeneJetzt, gesperrtJetzt, locks, reif);
+            String[] unbekanntesMuster = etagennetz.unbekanntesMusterAbholen();
+            if (unbekanntesMuster != null) unbekanntesMusterMelden(screen, unbekanntesMuster[0], unbekanntesMuster[1]);
             // Feste Karte: Wo ein offener Stuetzpunkt stehen MUSS, dort aber
             // nichts erkannt ist, gezielt und mit niedrigerer Schwelle nachsehen.
             List<Matcher.Hit> nachgesehen = new ArrayList<>();
@@ -5047,6 +5642,11 @@ public final class CathedralMode implements GameMode {
             }
             if (!nachgesehen.isEmpty()) etagennetz.nachtragen(nachgesehen, BATTLE_WAYPOINTS);
             long zeit4 = System.nanoTime();
+            // Bauplan L1: Gedaechtnis-Klick nur mit Schalter, nur solange das Sicherheitsnetz ihn in diesem
+            // Run nicht abgeschaltet hat, und nur, wenn nach dem Klick nachWegpunktZumKampf nachsieht (Turbo
+            // mit Kastenblick/Fotozyklus) -- sonst faellt ein nicht angenommener Klick niemandem auf.
+            etagennetz.gedaechtnisKlickErlauben(gedaechtnisklick && gedaechtnisFehlklicks < GEDAECHTNIS_FEHLKLICKS_MAX
+                    && istTurbo() && anlaufImKasten());
             Etagennetz.Plan plan = etagennetz.planen(reif);
             long zeit5 = System.nanoTime();
             // Wo bleibt die Zeit der Wegwahl? (Autor, 27.09.: "wartet so lange
@@ -5122,7 +5722,7 @@ public final class CathedralMode implements GameMode {
                         // und es wird wie bisher gewartet.
                         boolean nurEiner = offeneJetzt.size() == 1
                                 && knotenIndex(offeneJetzt, plan.klick(), 30) >= 0;
-                        if (etagennetz.gespielteStuetzpunkte() == 0 && !reif && !nurEiner) {
+                        if (etagennetz.gespielteStuetzpunkte() == 0 && !reif && !nurEiner && !etagennetz.festeKarte()) {
                             return aufZweitenBlickWarten(ctx);
                         }
                         return goTo(ctx, runs, plan.klick(), plan.grund());
@@ -5440,6 +6040,7 @@ public final class CathedralMode implements GameMode {
         wahlVergessen();   // neuer Wegpunkt, neues Fenster
         etagennetz.gespielt(target);
         planWartetSeit = 0;
+        wegpunktEinfach = einfacherKampf(target.name(), what);
         // WO GENAU HIN?
         //
         // Sonst immer in die Mitte. Beim Waechter nicht: dessen Vorlage
@@ -5455,11 +6056,166 @@ public final class CathedralMode implements GameMode {
         Log.action("Klick", Sprache.t("Waypoint: ", "Wegpunkt: ") + what + "  [" + zielX + "," + zielY + "]");
         ctx.input().click(zielX, zielY, 6);
         visited.add(new long[]{zielX, zielY, System.currentTimeMillis()});
+        // Bauplan L1 (Sicherheitsnetz): ein Klick aus dem Gedaechtnis wird in nachWegpunktZumKampf nachgeprueft.
+        gedaechtnisKlickStelle = etagennetz.planAusGedaechtnisVerbrauchen() ? new int[]{zielX, zielY} : null;
+        // Bauplan L2 (Schalter vorausweg): den naechsten Schritt gleich jetzt ausrechnen -- so, als waere
+        // dieser Stuetzpunkt schon fertig. Nach Kampf oder Fenster sieht etagenkarte() dann nur dort nach.
+        // Erst NACH dem Klick, damit er nicht wartet (die Zeit bis zum Kampf ist ohnehin Wartezeit).
+        vorausZiel = null;
+        vorausGrund = null;
+        if (vorausweg && wegplanung && route != Route.FULL && etagennetz.festeKarte()) {
+            Etagennetz.Plan voraus = etagennetz.vorausPlanen();
+            if (voraus != null) {
+                vorausZiel = voraus.klick();
+                vorausGrund = voraus.grund();
+                Log.debug("Kathedrale", "Vorausplanung: danach " + vorausGrund + " ("
+                        + vorausZiel.name() + " bei " + vorausZiel.centerX() + "," + vorausZiel.centerY() + ")");
+            }
+        }
         unknownScreens = 0;
         runs.progress(Sprache.t("Heading for a waypoint", "Wegpunkt angesteuert"));
         zeit.phase(Zeitbericht.ANLAUF);
-        if (istTurbo() && fotozyklusKampf) return nachWegpunktZumKampf(null, ctx, runs);
+        wegpunktGeklicktUm = System.currentTimeMillis();
+        wegpunktWartenGemeldet = false;
+        infokastenTipps = 0;
+        // Der Fotozyklus (Versuch, Standard aus) wartet selbst bis zu ~2 s auf Truppenbildschirm oder Fenster.
+        // 21.11.: der Anlauf-Kastenblick (Standard an) sieht ebenso gleich nach dem Klick nur auf die erwarteten Knoepfe.
+        if (istTurbo() && anlaufImKasten()) return nachWegpunktZumKampf(null, ctx, runs);
+        wegpunktFensterOffen = true;   // Autor 15.11. / F7Y7: siehe aufWegpunktFensterWarten
         ctx.sleepUntilChanged(500);
+        return Outcome.ACTED;
+    }
+
+    // ------------------------------------------------------------------
+    //  Autor 15.11. / F7Y7: Fenster nach dem Wegpunkt abwarten, Infokaesten
+    // ------------------------------------------------------------------
+    //
+    // Am 14.11. (10:45 und 11:16) brauchte das Fenster "Altar of Blood" nach dem Wegpunkt-Klick ueber 0,5 s. goTo()
+    // wartete 500 ms ohne Bildaenderung, das naechste Bild zeigte noch die Karte -- und die Wegplanung, die den
+    // Wegpunkt schon als gespielt fuehrte (etagennetz.gespielt, recentlyVisited), klickte 0,8 s nach dem ersten den
+    // NAECHSTEN Wegpunkt. Der Klick traf das inzwischen offene Altar-Fenster, dort das Talent-/Allianz-Symbol eines
+    // Kaempfers: Infokaesten ("Talent Shaman", "Alliance Brethren") verdeckten "Move on", der Bot erkannte 40 s nichts.
+    // Gemessen (1864 Wegpunkt-Klicks, 30.10.-14.11.): 1860 Mal kam das Fenster binnen ~0,1 s, 4 Mal nach 0,6-1,1 s.
+
+    /** Wann zuletzt ein Wegpunkt angeklickt wurde. */
+    private long wegpunktGeklicktUm = 0;
+    /**
+     * Wurde im letzten Schritt ein Wegpunkt angeklickt (oder auf sein Fenster gewartet)? Faellt am Anfang jedes
+     * Schritts -- jedes andere Bild (Fenster, Kampf, Ladebild) beendet das Warten also von selbst.
+     */
+    private boolean wegpunktFensterOffen = false;
+    private boolean wegpunktWartenGemeldet = false;
+    /** So lange hoechstens auf das Fenster eines Wegpunkts warten (mal Rechnertempo); danach wie bisher weiter. */
+    static final long WEGPUNKT_FENSTER_MS = 2500;
+
+    /**
+     * Seit dem Wegpunkt-Klick nur die Karte gesehen und noch nicht WEGPUNKT_FENSTER_MS um: weiter auf das Fenster
+     * warten, KEINEN zweiten Wegpunkt anklicken.
+     */
+    static boolean aufWegpunktFensterWarten(boolean nurKarteSeitKlick, long seitKlickMs, long grenzeMs) {
+        return nurKarteSeitKlick && seitKlickMs >= 0 && seitKlickMs < grenzeMs;
+    }
+
+    /** Null = nicht (mehr) warten, die Karte wird normal ausgewertet. */
+    private Outcome wegpunktFensterAbwarten(boolean nurKarteSeitKlick, BotContext ctx) {
+        if (!nurKarteSeitKlick) return null;
+        long seit = System.currentTimeMillis() - wegpunktGeklicktUm;
+        long grenze = de.hustlebot.core.Rechnertempo.mal(WEGPUNKT_FENSTER_MS);
+        if (!aufWegpunktFensterWarten(true, seit, grenze)) {
+            Log.info("Kathedrale", Sprache.t(
+                    "Waypoint clicked " + seit + " ms ago, but no window came -- carrying on on the map.",
+                    "Wegpunkt vor " + seit + " ms angeklickt, aber kein Fenster kam -- es geht auf der Karte weiter."));
+            return null;
+        }
+        if (!wegpunktWartenGemeldet) {
+            wegpunktWartenGemeldet = true;
+            Log.debug("Kathedrale", "Wegpunkt angeklickt, das Fenster laesst auf sich warten (" + seit
+                    + " ms) -- kein zweiter Wegpunkt, bis es da ist (hoechstens " + grenze + " ms).");
+        }
+        wegpunktFensterOffen = true;
+        ctx.sleep(60);
+        return Outcome.WAITING;
+    }
+
+    /** Wie oft im verdeckten Wahlfenster schon auf eine freie Stelle getippt wurde. */
+    private int infokastenTipps = 0;
+    /** Seit wann (und bis zu welchem Schritt) das verdeckte Wahlfenster ununterbrochen zu sehen ist. */
+    private long infokastenSeit = 0;
+    private int infokastenSchritt = -10;
+    /** So oft antippen, dann das Fenster mit dem roten X schliessen. */
+    static final int INFOKASTEN_TIPPS_MAX = 3;
+    /**
+     * Erst handeln, wenn das verdeckte Fenster so lange ununterbrochen steht. Beim Auf- und Zublenden eines
+     * Wahlfensters sind "Finish selection" und X kurz ohne Wahl zu sehen; ein Tipp, der dann schon auf die Karte
+     * dahinter fiele, koennte dort einen Wegpunkt treffen (der Boss am 14.11. lag bei 581,124).
+     */
+    static final long INFOKASTEN_RUHE_MS = 600;
+
+    enum Infokasten { NICHTS, WARTEN, ANTIPPEN, SCHLIESSEN }
+
+    /**
+     * Ein Wahlfenster (Altar, Camp, Dangerous Game), dessen Wahl verdeckt ist: "Finish selection" und das rote X sind
+     * zu sehen, "Move on"/"Claim reward" nicht -- darueber liegen Infokaesten (Talent, Allianz, Gegenstand). Steht das
+     * INFOKASTEN_RUHE_MS ruhig, erst eine freie Stelle antippen (schliesst die Kaesten), nach INFOKASTEN_TIPPS_MAX
+     * Versuchen das Fenster schliessen (rotes X: nichts gewaehlt, nie Kaempfer opfern; der Wegpunkt wird neu
+     * angesteuert).
+     */
+    static Infokasten verdecktesWahlfenster(boolean finishDa, boolean kreuzDa, boolean wahlDa, long ruhigMs, int tipps) {
+        if (!finishDa || !kreuzDa || wahlDa) return Infokasten.NICHTS;
+        if (ruhigMs < INFOKASTEN_RUHE_MS) return Infokasten.WARTEN;
+        return tipps < INFOKASTEN_TIPPS_MAX ? Infokasten.ANTIPPEN : Infokasten.SCHLIESSEN;
+    }
+
+    /**
+     * Die freie Stelle: Fenstermitte waagrecht, knapp unter dem roten X -- der helle Kopf des Fensters zwischen
+     * Titelband und "Choose an action:". Dort liegt kein Knopf, und kein Infokasten reicht so weit hinauf.
+     */
+    static int[] infokastenTippStelle(Matcher.Hit kreuz, int breite) {
+        return new int[]{breite / 2, kreuz.centerY() + 15};
+    }
+
+    /** Null = kein verdecktes Wahlfenster. */
+    private Outcome verdecktesWahlfensterLoesen(Mat screen, BotContext ctx, RunTracker runs) {
+        // Nur in der laufenden Reise, im Kampf nie (kostet dort auch keine Suche); ohne die beiden Vorlagen gibt es
+        // nichts zu erkennen.
+        if (!insideCathedral || imKampf() || !ctx.matcher().has(T_FINISH_SELECT) || !ctx.matcher().has(T_DC_CLOSE_X)) {
+            return null;
+        }
+        Optional<Matcher.Hit> kreuz = ctx.find(screen, T_DC_CLOSE_X);
+        boolean finishDa = kreuz.isPresent() && ctx.visible(screen, T_FINISH_SELECT);
+        long jetzt = System.currentTimeMillis();
+        // Ununterbrochen? Nur wenn es auch im Schritt davor zu sehen war -- sonst beginnt die Ruhezeit neu.
+        if (finishDa && infokastenSchritt != schrittZaehler - 1) infokastenSeit = jetzt;
+        if (finishDa) infokastenSchritt = schrittZaehler;
+        Infokasten was = verdecktesWahlfenster(finishDa, kreuz.isPresent(),
+                visibleAny(screen, ctx, T_MOVE_ON, T_CLAIM_REWARD), jetzt - infokastenSeit, infokastenTipps);
+        if (was == Infokasten.NICHTS || was == Infokasten.WARTEN || onCooldown("infokasten")) return null;
+        unknownScreens = 0;
+        cooldowns.put("infokasten", System.currentTimeMillis() + 700);
+        if (was == Infokasten.ANTIPPEN) {
+            infokastenTipps++;
+            int[] p = infokastenTippStelle(kreuz.get(), ctx.width());
+            Log.action("Klick", Sprache.t(
+                    "Choice window covered (info boxes over \"Move on\") -- tap a free spot at " + p[0] + "," + p[1]
+                            + " (" + infokastenTipps + " of " + INFOKASTEN_TIPPS_MAX + ")",
+                    "Wahlfenster verdeckt (Infokaesten ueber \"Move on\") -- freie Stelle antippen bei " + p[0] + ","
+                            + p[1] + " (" + infokastenTipps + " von " + INFOKASTEN_TIPPS_MAX + ")"));
+            ctx.input().click(p[0], p[1], 4);
+            ctx.sleepUntilChanged(600);
+            return Outcome.ACTED;
+        }
+        infokastenTipps = 0;
+        warnung(Sprache.t(
+                "The choice window stays covered after " + INFOKASTEN_TIPPS_MAX + " taps -- it is closed with the red X "
+                        + "(nothing chosen), the waypoint is approached again.",
+                "Das Wahlfenster bleibt nach " + INFOKASTEN_TIPPS_MAX + " Tipps verdeckt -- es wird mit dem roten X "
+                        + "geschlossen (nichts gewaehlt), der Wegpunkt wird neu angesteuert."));
+        fensterKlick(ctx, kreuz.get(), Sprache.t("Close the covered choice window", "Verdecktes Wahlfenster schliessen"));
+        wahlVergessen();
+        choiceMade = false;
+        finishConfirmPending = false;
+        runs.progress(Sprache.t("Covered choice window closed", "Verdecktes Wahlfenster geschlossen"));
+        ctx.sleepUntilChanged(800);
         return Outcome.ACTED;
     }
 
@@ -5472,6 +6228,7 @@ public final class CathedralMode implements GameMode {
      */
     private List<Matcher.Hit> openWaypoints(Mat screen, BotContext ctx, List<Matcher.Hit> locks) {
         List<Matcher.Hit> open = new ArrayList<>();
+        gesperrteMotive.clear();
 
         for (String base : EVENT_WAYPOINTS) {
             // Wie bei den Knoepfen zaehlt jede Vorlage ab dem Grundnamen als
@@ -5483,13 +6240,18 @@ public final class CathedralMode implements GameMode {
                 // und kein Wegpunkt -- die faellt sonst unter "dc_ally".
                 if (name.endsWith("_screen")) continue;
 
-                for (Matcher.Hit hit : ctx.matcher().findAll(screen, name, 0.84, 6)) {
+                List<Matcher.Hit> funde = kartenTreffer(screen, ctx, name, 6);
+                for (Matcher.Hit hit : funde) {
                     if (!isLocked(hit, locks)) open.add(hit);
+                    else gesperrteMotive.add(hit);   // fuers Gedaechtnis (Bauplan L1), nicht anklickbar
                 }
             }
         }
         return open;
     }
+
+    /** Erkannte Motive MIT Schloss der letzten openWaypoints-Auswertung (Gedaechtnis, Bauplan L1). */
+    private final List<Matcher.Hit> gesperrteMotive = new ArrayList<>();
 
     /**
      * Die Fragezeichen auf der Etage: noch unentdeckte Stuetzpunkte.
@@ -5501,7 +6263,19 @@ public final class CathedralMode implements GameMode {
      */
     private List<Matcher.Hit> questionMarks(Mat screen, BotContext ctx) {
         if (!ctx.matcher().has(T_QUESTION)) return List.of();
-        return ctx.matcher().findAll(screen, T_QUESTION, 0.84, 8);
+        return kartenTreffer(screen, ctx, T_QUESTION, 8);
+    }
+
+    /**
+     * Wo auf der Etagenkarte Stuetzpunkte liegen koennen (Autor, 02.10.: "Kastensuche auch in der
+     * Kathedrale"). Aus 42 827 Wegpunkt-Klicks (26.09.-02.10.): Mitten bei x 149-1047, y 93-622 --
+     * mit Rand fuer die Vorlage. Gesucht wird dort zuerst in halber Groesse, jede Stelle dann in voller
+     * Groesse nachgeprueft (dieselben Werte wie vorher).
+     */
+    static org.opencv.core.Rect kartenBereich(Mat screen) {
+        double fx = screen.width() / 1159.0, fy = screen.height() / 770.0;
+        int x0 = (int) (90 * fx), y0 = (int) (40 * fy), x1 = (int) (1110 * fx), y1 = (int) (690 * fy);
+        return new org.opencv.core.Rect(x0, y0, Math.min(screen.width(), x1) - x0, Math.min(screen.height(), y1) - y0);
     }
 
     /** Liegt ein Vorhaengeschloss auf diesem Wegpunkt? Dann ist er gesperrt. */
@@ -5799,7 +6573,12 @@ public final class CathedralMode implements GameMode {
         // Erst die alten Wege: eine Vorlage, die trifft, ist immer besser.
         for (String name : new String[]{T_GUARDIAN_LAIR, T_GUARDIAN}) {
             if (!ctx.matcher().has(name)) continue;
-            Optional<Matcher.Hit> direkt = ctx.matcher().find(screen, name, 0.84);
+            // 21.11.: dc_guardian (31x/318 ms je Run im ganzen Bild) auf einer festen Karte nur an den Stuetzpunkten.
+            // dc_guardian_lair nicht: der sitzt gross und meist an einer gemerkten Stelle (kleiner Kasten, billig).
+            List<org.opencv.core.Rect> kaesten = T_GUARDIAN.equals(name) ? symbolKaesten(screen) : null;
+            Optional<Matcher.Hit> direkt = kaesten != null
+                    ? ctx.matcher().findInKaesten(screen, name, kaesten, 0.84)
+                    : ctx.matcher().find(screen, name, 0.84);
             if (direkt.isPresent()) return direkt;
         }
 
@@ -6002,9 +6781,13 @@ public final class CathedralMode implements GameMode {
     /** Alle Bosse (Minions) der Etage -- auch die noch gesperrten. */
     private List<Matcher.Hit> alleBosse(Mat screen, BotContext ctx) {
         List<Matcher.Hit> bosse = new ArrayList<>();
+        // 21.11.: auf einer festen Karte nur an den Stuetzpunkten (dc_minion: 34x/380 ms je Run im ganzen Bild).
+        List<org.opencv.core.Rect> kaesten = symbolKaesten(screen);
         for (String base : BATTLE_WAYPOINTS) {
             for (String name : variantsOf(ctx, base)) {
-                for (Matcher.Hit hit : ctx.matcher().findAll(screen, name, 0.84, 6)) {
+                List<Matcher.Hit> funde = kaesten != null ? ctx.matcher().findAllInKaesten(screen, name, 0.84, 6, kaesten)
+                                                          : ctx.matcher().findAll(screen, name, 0.84, 6);
+                for (Matcher.Hit hit : funde) {
                     merkeKnoten(bosse, hit);
                 }
             }

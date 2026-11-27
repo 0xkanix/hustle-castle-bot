@@ -140,9 +140,17 @@ public final class Vorlagenordner {
             r("ev_reiter_",     "event/knoepfe"),
             r("ev_",            "event/anzeigen"),
 
+            // ---- Taegliche Spiel-Quests (Autor 18.11.): Buch, lila Reiter, Watch, Claim ----
+            r("sq_",            "spielquests"),
+
             // ---- kleine Spielteile: ein Ordner reicht ----
             r("lh_",            "lighthouse"),
             r("ko_",            "colosseum"),
+            // Clan-Verlies und Gebietskarte (gelernt 18.-20.11.) -- vor der allgemeinen "rs_"-Regel (Burg-Stand)
+            r("rs_verlies_",    "dungeon/clan"),
+            r("rs_chat_",       "dungeon/clan"),
+            r("rs_reisechat_",  "dungeon/clan"),
+            r("rs_gebietskarte_", "dungeon/karte"),
             r("rs_",            "burgstand"),
             r("cl_",            "clanladen"),
             r("tt_",            "titantower"),

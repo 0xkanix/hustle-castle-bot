@@ -185,7 +185,9 @@ public final class Mauswache {
                         }
                         continue;
                     }
-                    boolean aktiv = laeuft.getAsBoolean();
+                    // Hintergrund-Modus (Autor 20.11.): Autor bewegt seine Maus absichtlich (Minecraft) -- keine Wache.
+                    // Beim Umschalten zaehlt das wie ein frischer Start (Schonfrist).
+                    boolean aktiv = laeuft.getAsBoolean() && !Hintergrund.an();
                     if (!aktiv) {
                         warAktiv = false;
                         verdacht = 0;

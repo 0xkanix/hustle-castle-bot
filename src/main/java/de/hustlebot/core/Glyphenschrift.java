@@ -87,8 +87,33 @@ public final class Glyphenschrift {
     }
 
     /** Ergebnis fuer ein Namensbild: Fingerabdruck, die Glyphen-Nummern, der gelesene Text ("?" = unbekannt). */
-    public record Ergebnis(String fingerabdruck, int[] nummern, String text, int neueGlyphen) {
+    public record Ergebnis(String fingerabdruck, int[] nummern, String text, int neueGlyphen, List<Schriftbild> bilder) {
+        /** Ohne Schriftbild (Stand vor dem 21.11.). */
+        public Ergebnis(String fingerabdruck, int[] nummern, String text, int neueGlyphen) {
+            this(fingerabdruck, nummern, text, neueGlyphen, List.of());
+        }
+
+        public Ergebnis {
+            bilder = bilder == null ? List.of() : List.copyOf(bilder);
+        }
+
         public boolean leer() { return nummern.length == 0; }
+
+        /** Autor 21.11.: hat das Namensbild ein Schriftbild (der Name als kleines Bild, siehe Schriftbild)? */
+        public boolean hatBild() { return !bilder.isEmpty(); }
+
+        /** Dasselbe Ergebnis mit einem weiteren Schriftbild (z. B. aus dem Vergleichsfenster); null = unveraendert. */
+        public Ergebnis mitBild(Schriftbild b) {
+            if (b == null) return this;
+            List<Schriftbild> l = new ArrayList<>(bilder);
+            l.add(b);
+            return new Ergebnis(fingerabdruck, nummern, text, neueGlyphen, l);
+        }
+
+        /** Nur ein Schriftbild, ohne Glyphen (leer() ist dann true). null bei null. */
+        public static Ergebnis nurBild(Schriftbild b) {
+            return b == null ? null : new Ergebnis("", new int[0], "", 0, List.of(b));
+        }
     }
 
     /** Namensbilder ablegen ja/nein (Pruefprogramm schaltet es ab). */
@@ -127,7 +152,9 @@ public final class Glyphenschrift {
         String fp = fingerabdruck(nr);
         if (nr.length > 0 && namensbilderSpeichern) namensbildAblegen(bild, z.kasten(), fp, text.toString());
         if (neu > 0 || System.currentTimeMillis() - zuletztGespeichert > 60_000) speichern();
-        return new Ergebnis(fp, nr, text.toString(), neu);
+        // Autor 21.11.: dazu der ganze Name als kleines Bild (Schriftbild) -- vergleicht auch, wenn die Zerlegung kippt
+        Schriftbild sb = nr.length > 0 ? Schriftbild.aus(bild, Schriftbild.SCHILD) : null;
+        return new Ergebnis(fp, nr, text.toString(), neu, sb == null ? List.of() : List.of(sb));
     }
 
     /** Fingerabdruck eines Namensbildes, z. B. "4.17.9.9.23" (leer, wenn keine Schrift zu sehen ist). */
@@ -318,6 +345,13 @@ public final class Glyphenschrift {
      * Das abgelegte Namensbild zu einem Fingerabdruck: genau dieser, sonst der aehnlichste mit demselben Namen;
      * null, wenn keins da ist.
      */
+    /** Das Namensbild genau dieses Fingerabdrucks (ohne Ersatz durch einen aehnlichen), oder null (Autor 21.11.). */
+    public synchronized Path namensbildGenau(String fingerabdruck) {
+        if (fingerabdruck == null || fingerabdruck.isBlank()) return null;
+        Path genau = ordner.resolve("namen").resolve(kurz(fingerabdruck) + ".png");
+        return Files.exists(genau) ? genau : null;
+    }
+
     public synchronized Path namensbild(String fingerabdruck) {
         laden();
         if (fingerabdruck == null || fingerabdruck.isBlank()) return null;

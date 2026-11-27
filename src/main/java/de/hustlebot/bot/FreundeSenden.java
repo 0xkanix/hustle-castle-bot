@@ -1,6 +1,7 @@
 package de.hustlebot.bot;
 
 import de.hustlebot.core.Log;
+import de.hustlebot.core.Sprache;
 import de.hustlebot.core.Matcher;
 import org.opencv.core.Core;
 import org.opencv.core.Mat;
@@ -660,10 +661,10 @@ public final class FreundeSenden {
         int x = (int) Math.round(w * 0.52);
         int oben = (int) Math.round(h * 0.44), unten = (int) Math.round(h * 0.72);
         if (hoch) {
-            Log.action("Wischen", "Freundesliste zurueck nach oben ziehen (" + wischer + ").");
+            Log.action("Wischen", Sprache.t("Drag the friends list back up (", "Freundesliste zurueck nach oben ziehen (") + wischer + ").");
             ctx.input().drag(x, oben, x, unten);
         } else {
-            Log.action("Wischen", "Freundesliste nach unten ziehen (" + wischer + ").");
+            Log.action("Wischen", Sprache.t("Drag the friends list down (", "Freundesliste nach unten ziehen (") + wischer + ").");
             ctx.input().drag(x, unten, x, oben);
         }
         zuletztGeklickt = System.currentTimeMillis();

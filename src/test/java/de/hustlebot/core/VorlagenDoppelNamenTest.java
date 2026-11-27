@@ -71,4 +71,21 @@ class VorlagenDoppelNamenTest {
         m.loadAll();
         assertTrue(warnungenDoppelt(ab) >= 1, "hat der Spieler selbst aufgenommen, soll die Warnung bleiben");
     }
+
+    /** Konrad 20.11. (BUX9): bei jedem Modus-Start wird neu geladen -- 31 gleiche Warnungen in einer Nacht. Einmal reicht. */
+    @Test
+    void eigeneAufnahmeWarntNurBeimErstenLaden(@TempDir Path wurzel, @TempDir Path eigene) throws Exception {
+        bild(wurzel.resolve("dungeon/confirm.png"), 40);
+        bild(eigene.resolve("Dungeon/confirm.png"), 200);
+        Matcher.EIGENE_BILDER = eigene;
+        Matcher m = new Matcher(wurzel);
+        int ab = Log.size();
+        m.loadAll();
+        assertEquals(1, warnungenDoppelt(ab), "beim ersten Laden: eine Warnung");
+        int zweites = Log.size();
+        m.loadAll();
+        m.loadAll();
+        assertEquals(0, warnungenDoppelt(zweites), "beim Neuladen (naechster Modus): keine neue Warnung");
+        assertTrue(m.has("confirm"));
+    }
 }

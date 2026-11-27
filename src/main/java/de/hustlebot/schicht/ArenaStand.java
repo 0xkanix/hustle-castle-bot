@@ -170,6 +170,23 @@ public final class ArenaStand {
     private static volatile Stand stand;
 
     /**
+     * Die Arena ist fuer den Bot vorbei (Arena-Modus zu Ende oder ein anderer Modus spielt): Stand weg, und auch das Seitenfenster
+     * darf den letzten Stand nicht mehr zehn Minuten weiterzeigen (23:12 am 20.11.: Fenster blieb bis 23:21 neben einem anderen Modus offen).
+     */
+    private static volatile long beendetUm;
+
+    public static void beenden() {
+        beendetUm = System.currentTimeMillis();
+        setzen(null);
+    }
+
+    /** Wurde die Arena beendet, nachdem dieser Stand entstanden ist? Dann gilt er nicht mehr. */
+    public static boolean beendetNach(long standUm) {
+        return beendetUm != 0 && beendetUm >= standUm;
+    }
+
+
+    /**
      * Autor 29.10.: "Wenn ich den Chat ingame oeffne innerhalb einer Arena, kann ich nichts schreiben und es ist immer
      * noch offen." Sieht der Bot den offenen Chat (Pfeil "chat_close" am rechten Chat-Rand), verschwindet die Schicht und
      * schluckt keine Taste -- fuer 4 s nach dem letzten Blick auf den offenen Chat.

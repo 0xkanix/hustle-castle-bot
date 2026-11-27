@@ -657,9 +657,52 @@ public final class Texterkennung {
      *                sonst ein Kuerzel wie "ru"
      */
     public static List<String> lies(BufferedImage bild, String sprache) {
-        List<String> zeilen = new ArrayList<>();
-        if (bild == null) return zeilen;
+        if (bild == null) return new ArrayList<>();
+        // Sparsam 20.11.: dasselbe Bild (gleiche Bildpunkte, gleiche Sprache) nicht zweimal lesen -- vor allem nicht die
+        // Windows-Texterkennung (eigenes PowerShell, Bild als Datei, 0,15-0,35 s je Aufruf), die laeuft, wenn PaddleOCR
+        // sich nicht sicher ist. Das Ergebnis haengt nur von den Bildpunkten ab.
+        BildSchluessel k = new BildSchluessel(sprache == null ? "" : sprache, bild.getWidth(), bild.getHeight(), PaddleLeser.abdruck(bild));
+        List<String> schon = GELESEN.get(k);
+        if (schon != null) {
+            AUS_DEM_GEDAECHTNIS.incrementAndGet();
+            return new ArrayList<>(schon);
+        }
+        List<String> zeilen = liesFrisch(bild, sprache);
+        // Leer kann auch "gerade schiefgegangen" heissen (Skript fehlt, PowerShell haengt) -- das nicht merken.
+        if (zeilen.stream().anyMatch(z -> z != null && !z.isBlank())) {
+            GELESEN.put(k, List.copyOf(zeilen.stream().map(z -> z == null ? "" : z).toList()));
+        }
+        return zeilen;
+    }
 
+    private record BildSchluessel(String sprache, int breite, int hoehe, long abdruck) { }
+
+    /** Zuletzt gelesene Bilder (nur die Ergebnisse -- wenige KB). */
+    private static final java.util.Map<BildSchluessel, List<String>> GELESEN = java.util.Collections.synchronizedMap(
+            new java.util.LinkedHashMap<>(64, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(java.util.Map.Entry<BildSchluessel, List<String>> e) {
+                    return size() > 256;
+                }
+            });
+    private static final java.util.concurrent.atomic.AtomicLong AUS_DEM_GEDAECHTNIS = new java.util.concurrent.atomic.AtomicLong();
+    private static final java.util.concurrent.atomic.AtomicLong WINDOWS_AUFRUFE = new java.util.concurrent.atomic.AtomicLong();
+    private static final java.util.concurrent.atomic.AtomicLong WINDOWS_NANOS = new java.util.concurrent.atomic.AtomicLong();
+
+    /**
+     * Bericht je Durchlauf (und zuruecksetzen): PaddleOCR-Zeilen, Windows-Aufrufe, Treffer im Gedaechtnis. Leer, wenn
+     * nichts gelesen wurde.
+     */
+    public static String bericht() {
+        String paddle = PaddleLeser.bericht();
+        long w = WINDOWS_AUFRUFE.getAndSet(0), wms = WINDOWS_NANOS.getAndSet(0) / 1_000_000, g = AUS_DEM_GEDAECHTNIS.getAndSet(0);
+        if (w == 0 && g == 0) return paddle;
+        String eigen = Sprache.t("Windows text recognition " + w + "x (" + wms + " ms), whole pictures from memory " + g + "x",
+                "Windows-Texterkennung " + w + "x (" + wms + " ms), ganze Bilder aus dem Gedaechtnis " + g + "x");
+        return paddle.isBlank() ? eigen : paddle + "; " + eigen;
+    }
+
+    private static List<String> liesFrisch(BufferedImage bild, String sprache) {
         // Autor 25.10.: "PaddleOCR komplett ersetzen -- nur wenn es nicht geht, als Backup die Windows-Texterkennung."
         // Gemessen an 112 strittigen Arena-Namen: Windows 15 % genau richtig, PaddleOCR 28 %, beide gemischt 33 % --
         // PaddleOCR, wenn es sich sicher ist; sonst Windows, wenn Windows etwas liest; sonst PaddleOCR.
@@ -669,7 +712,10 @@ public final class Texterkennung {
             if (PaddleLeser.sicher(p)) return new ArrayList<>(p.stream().map(PaddleLeser.Lesung::text).toList());
             if (!p.isEmpty()) paddle = new ArrayList<>(p.stream().map(PaddleLeser.Lesung::text).toList());
         }
+        long t0 = System.nanoTime();
         List<String> windows = liesWindows(bild, sprache);
+        WINDOWS_NANOS.addAndGet(System.nanoTime() - t0);
+        WINDOWS_AUFRUFE.incrementAndGet();
         if (windows.stream().anyMatch(z -> z != null && !z.isBlank()) || paddle == null) return windows;
         return paddle;
     }

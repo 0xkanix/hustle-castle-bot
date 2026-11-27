@@ -65,7 +65,7 @@ final class Hilfesuche {
             e("stigma stigmas titan loeschen leveln delete level", "Stigmas: choose the titan", "Stigmas: Titan wählen", S, "titan"),
             e("anzahl oft many number runs durchlaeufe", "How many runs", "Wie oft gespielt wird", S, "anzahl"),
             e("start starten los begin", "Start button", "Start-Knopf", S, "start"),
-            e("danach after warteschlange queue anhaengen", "Add afterwards (queue)", "Danach anhängen (Warteschlange)", S, "danach"),
+            e("danach after warteschlange queue anhaengen nacheinander reihenfolge", "Queue (modes one after another)", "Warteschlange (Modi nacheinander)", S, "danach"),
             e("kreislauf loop routine nacht night event ablauf", "Loop (event routine)", "Kreislauf (Event-Ablauf)", S, "kreislauf"),
             e("kreislauf loop ohne event without", "Loop without event", "Kreislauf ohne Event", S, "kreislaufOhne"),
             e("anhalten stop pause notaus emergency f9 f10 taste key weiter resume", "Stop and pause keys", "Anhalten und Pause (Tasten)", S, "tasten"),

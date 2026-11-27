@@ -474,6 +474,30 @@ public final class MeinTeam {
         gelesenUm = 0;
     }
 
+    /**
+     * Autor 21.11.: nach einem Kontowechsel gehoert arena-ich.txt einem anderen Konto -- sofort neu lesen, und der
+     * Fehlversuch des alten Kontos gilt nicht fuer das neue.
+     */
+    static synchronized void kontoGewechselt() {
+        neuLesen();
+        versuchImSpeicher = null;
+        angefordertGemeldet = false;
+    }
+
+    /**
+     * Autor 21.11.: Hat dieses Konto noch nie einen Team-Scan gehabt (und auch keinen Fehlversuch in den letzten 3 Tagen)?
+     * Dann kommt nach einem Kontowechsel zuerst der Team-Scan, danach der Modus.
+     */
+    static boolean ohneScan() {
+        Stand s = lesen();
+        if (s.stand() != null) return false;
+        LocalDateTime jetzt = Zeitzone.jetzt();
+        for (LocalDateTime v : new LocalDateTime[]{s.versuch(), versuchImSpeicher}) {
+            if (v != null && Duration.between(v, jetzt).compareTo(NACH_FEHLVERSUCH) < 0) return false;
+        }
+        return true;
+    }
+
     static Stand parsen(List<String> zeilen) {
         LocalDateTime st = null, versuch = null;
         int p = -1;

@@ -49,13 +49,15 @@ public final class TeamScanMode implements GameMode {
             gang.starten();
         }
         if (gang.schritt(screen, ctx)) {
-            runs.progress("Team-Scan");   // kein Haenger-Alarm, solange der Scan Schritte macht
+            runs.progress(Sprache.t("Team scan", "Team-Scan"));   // kein Haenger-Alarm, solange der Scan Schritte macht
             return Outcome.ACTED;
         }
         if (!gang.zurueckInBurg()) return Outcome.FATAL;
         if (gang.abgebrochen()) {
-            Log.warn(TeamScan.WER, "Team-Scan abgebrochen (" + String.join("; ", gang.fehlgeschlagen()) + ") -- zurueck in der Burg, "
-                    + "es geht normal weiter. In 3 Tagen wird es noch einmal versucht.");
+            Log.warn(TeamScan.WER, de.hustlebot.core.Sprache.t("Team scan cancelled (" + String.join("; ", gang.fehlgeschlagen())
+                    + ") -- back in the castle, carrying on as usual. It will be tried again in 3 days.",
+                    "Team-Scan abgebrochen (" + String.join("; ", gang.fehlgeschlagen()) + ") -- zurueck in der Burg, "
+                    + "es geht normal weiter. In 3 Tagen wird es noch einmal versucht."));
         }
         runs.completeRun();
         return Outcome.FINISHED;
